@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -466,6 +467,7 @@
   .settings-input:focus{border-color:var(--accent)}
   .settings-btn-row{display:flex;gap:8px}
   .settings-btn{border:1px solid var(--border);background:none;border-radius:var(--radius);padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;color:var(--text)}
+  .cal-mode-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   .settings-btn:hover{background:var(--bg)}
   .settings-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
   .settings-btn.primary:hover{background:#1d4ed8}
@@ -1551,6 +1553,27 @@
     </div>
 
     <div class="settings-section">
+      <div class="settings-section-title">📅 カレンダー連携（Apple Watch / iPhone）</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
+        下のURLを iPhone の「照会するカレンダーを追加」に登録すると、案件の日程が標準カレンダー→Apple Watch に表示されます（読み取り専用・数時間おきに自動更新）。個人別を選ぶと、そのメンバーが担当の案件だけになります。
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <button type="button" class="settings-btn cal-mode-btn active" id="cal-mode-all" onclick="setCalMode('all')">全案件</button>
+        <button type="button" class="settings-btn cal-mode-btn" id="cal-mode-user" onclick="setCalMode('user')">個人別</button>
+      </div>
+      <div id="cal-user-wrap" style="display:none;margin-bottom:10px">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">対象メンバー</label>
+        <select class="settings-input" id="cal-user-select" style="margin-bottom:0" onchange="updateCalUrl()"></select>
+      </div>
+      <div style="font-size:11px;word-break:break-all;background:var(--bg);padding:8px 10px;border-radius:6px;color:var(--text);border:1px solid var(--border)" id="cal-url-display">—</div>
+      <div class="settings-btn-row" style="margin-top:8px">
+        <button class="settings-btn primary" onclick="copyCalUrl()">URLをコピー</button>
+        <button class="settings-btn" onclick="subscribeCalUrl()">iPhoneで購読</button>
+      </div>
+      <div class="settings-status" id="cal-copy-status"></div>
+    </div>
+
+    <div class="settings-section">
       <div class="settings-section-title">キャッシュのリセット</div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">ブラウザ内の一時データを削除します。スプレッドシートのデータは消えません。動作がおかしいときや接続先を切り替えた後に使用してください。</div>
       <button class="settings-btn" onclick="settingsClearCache()" style="border-color:var(--border);color:var(--text-muted)">🔄 キャッシュをリセット</button>
@@ -1602,7 +1625,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.18';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.20';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4017,12 +4040,63 @@ function openSettings(){
   // ステータスリセット
   const st = document.getElementById('settings-status');
   if(st){ st.className='settings-status'; st.textContent=''; }
+  // カレンダー連携の初期化
+  populateCalUserSelect();
+  setCalMode('all');
   modal.classList.add('open');
 }
 
 function closeSettings(){
   const modal = document.getElementById('settings-modal');
   if(modal) modal.classList.remove('open');
+}
+
+// ===== カレンダー連携（.ics購読URL）=====
+let _calMode='all';
+function setCalMode(mode){
+  _calMode = mode;
+  const ab=document.getElementById('cal-mode-all'); const ub=document.getElementById('cal-mode-user');
+  if(ab) ab.classList.toggle('active', mode==='all');
+  if(ub) ub.classList.toggle('active', mode==='user');
+  const w=document.getElementById('cal-user-wrap'); if(w) w.style.display = mode==='user'?'block':'none';
+  updateCalUrl();
+}
+function populateCalUserSelect(){
+  const sel=document.getElementById('cal-user-select'); if(!sel) return;
+  const list=MEMBERS.filter(m=>m.role!=='vendor');
+  sel.innerHTML=list.map(m=>`<option value="${escHtml(String(m.id||''))}">${escHtml(m.name||String(m.id||''))}</option>`).join('');
+  const meIdx=list.findIndex(m=>String(m.id)===String(currentUser));
+  if(meIdx>=0) sel.selectedIndex=meIdx;
+}
+function buildCalUrl(){
+  let url = GAS_URL + '?action=ics';
+  if(_calMode==='user'){
+    const uid=document.getElementById('cal-user-select')?.value || '';
+    if(uid) url += '&user=' + encodeURIComponent(uid);
+  }
+  return url;
+}
+function updateCalUrl(){
+  const el=document.getElementById('cal-url-display');
+  if(el) el.textContent = buildCalUrl();
+}
+function _calCopyDone(){
+  const s2=document.getElementById('cal-copy-status');
+  if(s2){ s2.textContent='コピーしました'; s2.style.color='#10B981'; setTimeout(()=>{ s2.textContent=''; },2000); }
+}
+function _fallbackCopy(text){
+  try{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }catch(e){}
+}
+function copyCalUrl(){
+  const url=buildCalUrl();
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(_calCopyDone).catch(()=>{ _fallbackCopy(url); _calCopyDone(); });
+  } else { _fallbackCopy(url); _calCopyDone(); }
+}
+function subscribeCalUrl(){
+  // webcal:// にするとiOSがカレンダー購読の確認画面を開く
+  const url=buildCalUrl().replace(/^https?:\/\//,'webcal://');
+  window.location.href=url;
 }
 
 async function settingsTestConnection(){
@@ -5251,14 +5325,15 @@ function renderVendors(editable){
         }).filter(Boolean).join('');
         if(lines) dayLines=lines;
       }
-      if(!dayLines){ return ''; }
       const grand=grandW+grandE;
       const totalLine=admin&&grand?`<div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-size:11px;text-align:right">
         <span style="font-size:12px;font-weight:700;color:#B45309">総計 ${yen(grand)}</span>
       </div>`:'';
+      // 明細（作業員・金額）が無くても、案件に割り当てられている協力会社名は必ず表示する
+      const detailHtml = dayLines ? `<div style="margin-top:4px">${dayLines}</div>` : '';
       return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;margin-bottom:6px;background:var(--bg)">
         <div style="font-size:12px;font-weight:600;color:#B45309">${nm}</div>
-        <div style="margin-top:4px">${dayLines}</div>
+        ${detailHtml}
         ${totalLine}
       </div>`;
     }).filter(Boolean).join('');
