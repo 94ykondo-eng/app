@@ -508,6 +508,9 @@
   .mini-day-num{font-size:11px;font-weight:500;text-align:center;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin:0 auto 2px}
   .mini-day-dots{display:flex;flex-wrap:wrap;gap:1px;justify-content:center;padding:0 2px}
   .mini-day-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+  .mini-cal-legend{display:flex;flex-wrap:wrap;gap:5px 10px;padding:8px 4px 2px;border-top:1px solid var(--border);margin-top:6px}
+  .mini-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary)}
+  .mini-legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
   /* 日報報告 */
   .rp-section{margin-bottom:14px}
@@ -601,6 +604,13 @@
   .member-card-name{font-size:15px;font-weight:600}
   .member-card-id{font-size:12px;color:var(--text-muted);margin-top:1px}
   .member-card-actions{display:flex;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+  .member-cat{margin-bottom:12px}
+  .member-cat-header{display:flex;align-items:center;gap:8px;cursor:pointer;padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;user-select:none;transition:background 0.1s}
+  .member-cat-header:hover{background:var(--bg)}
+  .member-cat-arrow{font-size:11px;color:var(--text-muted);width:12px;flex-shrink:0;text-align:center}
+  .member-cat-title{font-size:13px;font-weight:700;color:var(--text)}
+  .member-cat-count{font-size:11px;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);border-radius:99px;padding:1px 9px;margin-left:2px}
+  .member-cat-body{padding:12px 2px 2px}
   .btn-edit{flex:1;border:1px solid var(--border);background:none;border-radius:6px;padding:6px;font-size:12px;cursor:pointer;color:var(--text-muted)}
   .btn-edit:hover{background:var(--bg)}
   .btn-delete{border:1px solid #FCA5A5;background:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;color:var(--danger)}
@@ -1167,6 +1177,7 @@
             <div class="pf-row" id="ap-est-wrap"><label class="pf-label">見積金額（円）</label>
               <span class="pf-val" id="view-est" style="display:none"></span>
               <input class="pf-input" id="ap-est" type="number" placeholder="150000">
+              <div id="ap-est-daily" style="display:none;flex-direction:column;gap:5px"></div>
             </div>
             <div class="pf-row" id="ap-expenses-wrap" style="display:none"><label class="pf-label">諸経費</label>
               <div id="pf-expenses-body"></div>
@@ -1624,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.24';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.35';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1840,6 +1851,10 @@ function apAddCase(){
     memo:document.getElementById('ap-memo')?.value||'',warn:false,comments:[],
     vendors:(syncVendorInputs(),collectVendors()), expenses:collectExpenses()
   };
+  // 帯案件は日別見積を保存（estは合計）
+  _collectEstDailyInputs();
+  if(nc.start&&nc.end&&nc.end>nc.start){ nc.estDaily=_estDailyTrim(nc.start,nc.end); nc.est=Object.values(nc.estDaily).reduce((a,b)=>a+b,0); }
+  else nc.estDaily={};
   cases.push(nc);
   saveCase_GAS(nc);
   logActivity('追加', nc);
@@ -2453,6 +2468,7 @@ function parseCases(data){
     barColor: c.barColor || '',
     status:   c.status   || '未対応',
     est:      Number(c.est)||0,
+    estDaily: (c.estDaily&&typeof c.estDaily==='object')?c.estDaily:(()=>{try{const p=JSON.parse(c.estDaily||'{}');return (p&&typeof p==='object'&&!Array.isArray(p))?p:{};}catch(e){return {};}})(),
     memo:     c.memo     || '',
     warn:     c.warn==='true'||c.warn===true,
     vendors:  Array.isArray(c.vendors) ? c.vendors : (()=>{ try{ return c.vendors?JSON.parse(c.vendors):[]; }catch(e){ return []; } })(),
@@ -2816,7 +2832,7 @@ async function saveCase_GAS(c){
     address: c.address, start: c.start, end: c.end, assignee: c.assignee,
     assignees: JSON.stringify(c.assignees||[c.assignee||''].filter(Boolean)),
     barColor: c.barColor||'',
-    status: c.status, est: c.est, memo: c.memo, warn: c.warn,
+    status: c.status, est: c.est, estDaily: JSON.stringify(c.estDaily||{}), memo: c.memo, warn: c.warn,
     vendors: c.vendors || [], expenses: c.expenses || [],
     docs: JSON.stringify(c.docs||[]),
     deletedDocs: JSON.stringify(c.deletedDocs||[])
@@ -3856,11 +3872,8 @@ function showConfirm(msg, okLabel='OK'){
 
 // ===== メンバー管理 =====
 
-function renderMembers(){
-  const grid=document.getElementById('members-grid');
-  if(!grid) return;
-  grid.innerHTML='';
-  MEMBERS.forEach(m=>{
+let _memberCatCollapsed={};
+function _buildMemberCard(m){
     const roleLabel={admin:'経営者',keiri:'経理',field:'現場スタッフ',office:'現場スタッフ',vendor:'協力業者'}[m.role]||'現場スタッフ';
     const roleCls={admin:'role-admin',keiri:'role-keiri',field:'role-field',office:'role-field',vendor:'role-vendor'}[m.role]||'role-field';
     const card=document.createElement('div'); card.className='member-card';
@@ -3889,7 +3902,33 @@ function renderMembers(){
       actions.appendChild(editBtn); actions.appendChild(delBtn);
     }
     card.appendChild(header); card.appendChild(actions);
-    grid.appendChild(card);
+    return card;
+}
+function renderMembers(){
+  const grid=document.getElementById('members-grid');
+  if(!grid) return;
+  grid.style.display='block';
+  grid.innerHTML='';
+  const cats=[
+    {key:'admin', title:'経営者', match:m=>m.role==='admin'},
+    {key:'keiri', title:'経理', match:m=>m.role==='keiri'},
+    {key:'field', title:'現場スタッフ', match:m=>m.role!=='admin'&&m.role!=='keiri'&&m.role!=='vendor'},
+    {key:'vendor', title:'協力業者', match:m=>m.role==='vendor'},
+  ];
+  cats.forEach(cat=>{
+    const members=MEMBERS.filter(cat.match);
+    if(!members.length) return;
+    const collapsed=_memberCatCollapsed[cat.key]===true;
+    const sec=document.createElement('div'); sec.className='member-cat';
+    const head=document.createElement('div'); head.className='member-cat-header';
+    head.innerHTML=`<span class="member-cat-arrow">${collapsed?'▶':'▼'}</span><span class="member-cat-title">${cat.title}</span><span class="member-cat-count">${members.length}</span>`;
+    head.addEventListener('click',()=>{ _memberCatCollapsed[cat.key]=!collapsed; renderMembers(); });
+    const body=document.createElement('div'); body.className='member-cat-body'; if(collapsed) body.style.display='none';
+    const inner=document.createElement('div'); inner.className='members-grid';
+    members.forEach(m=>inner.appendChild(_buildMemberCard(m)));
+    body.appendChild(inner);
+    sec.appendChild(head); sec.appendChild(body);
+    grid.appendChild(sec);
   });
   if(isAdmin()) renderStampManager();
 }
@@ -5119,8 +5158,15 @@ function updateBarColorPicker(selColor){
 }
 function expenseTotal(list){ return (list||[]).reduce((t,e)=>t+(parseInt(e.a)||0),0); }
 function caseExpenseTotal(c){ return expenseTotal(c&&c.expenses); }
-function collectExpenses(){ return pfExpenses.map(e=>({n:String(e.n||'').trim(), a:parseInt(e.a)||0})).filter(e=>e.n||e.a); }
-function expenseAdd(){ pfExpenses.push({n:'',a:0}); renderExpenses(true); }
+function collectExpenses(){ return pfExpenses.map(e=>{ const o={n:String(e.n||'').trim(), a:parseInt(e.a)||0}; if(e.d) o.d=e.d; return o; }).filter(e=>e.n||e.a); }
+function expenseAdd(d){ pfExpenses.push(d?{n:'',a:0,d:d}:{n:'',a:0}); renderExpenses(true); }
+// 編集フォームの期間が帯（2日以上）なら日リストを返す
+function _expBandDays(){
+  const s=document.getElementById('ap-start')?.value||'';
+  const e=document.getElementById('ap-end')?.value||'';
+  const days=caseDayList(s,e);
+  return days.length>=2?days:null;
+}
 function expenseRemove(i){ pfExpenses.splice(i,1); renderExpenses(true); }
 function expenseSetName(i,v){ if(pfExpenses[i]) pfExpenses[i].n=v; }
 function expenseSetAmt(i,v){ if(pfExpenses[i]) pfExpenses[i].a=parseInt(v)||0; }
@@ -5130,24 +5176,51 @@ function renderExpenses(editable){
   if(!body||!wrap) return;
   const admin=isAdmin();
   if(!admin){ wrap.style.display='none'; body.innerHTML=''; return; } // 金額＝管理者のみ
-  if(editable){
-    wrap.style.display='flex'; wrap.style.flexDirection='column';
-    let html='';
-    pfExpenses.forEach((e,i)=>{
-      html+=`<div class="vw-row">
+  const _md=ds=>{ const p=String(ds).split('-'); return parseInt(p[1],10)+'/'+parseInt(p[2],10); };
+  const _rowHtml=(e,i)=>`<div class="vw-row">
         <input class="vw-name" value="${escHtml(e.n||'')}" placeholder="項目名（例：駐車場代）" onchange="expenseSetName(${i},this.value)">
         <input class="vw-amt" type="number" placeholder="金額" value="${e.a||''}" onchange="expenseSetAmt(${i},this.value)">
         <button class="vw-del" onclick="expenseRemove(${i})" title="削除">×</button>
       </div>`;
-    });
-    html+=`<button class="vw-add" onclick="expenseAdd()">＋ 諸経費を追加</button>`;
+  if(editable){
+    wrap.style.display='flex'; wrap.style.flexDirection='column';
+    const days=_expBandDays();
+    let html='';
+    if(days){
+      // 帯案件: 日付ごとにグループ表示。日付なしの既存項目は初日に割当て（互換）
+      pfExpenses.forEach(e=>{ if(!e.d) e.d=days[0]; });
+      const extraDates=[...new Set(pfExpenses.map(e=>e.d).filter(d=>days.indexOf(d)===-1))].sort();
+      [...days,...extraDates].forEach(d=>{
+        const isExtra=extraDates.indexOf(d)>=0;
+        html+=`<div style="font-size:11px;font-weight:700;color:${isExtra?'#B45309':'var(--text-secondary)'};margin-top:6px">${_md(d)}${isExtra?'（期間外）':''}</div>`;
+        pfExpenses.forEach((e,i)=>{ if(e.d===d) html+=_rowHtml(e,i); });
+        html+=`<button class="vw-add" onclick="expenseAdd('${d}')">＋ ${_md(d)}の諸経費を追加</button>`;
+      });
+    } else {
+      // 単日案件: 従来通り（日付は持たせない）
+      pfExpenses.forEach(e=>{ if(e.d) delete e.d; });
+      pfExpenses.forEach((e,i)=>{ html+=_rowHtml(e,i); });
+      html+=`<button class="vw-add" onclick="expenseAdd()">＋ 諸経費を追加</button>`;
+    }
     html+=`<div class="vendor-subtotal">諸経費 合計 ¥${expenseTotal(pfExpenses).toLocaleString()}</div>`;
     body.innerHTML=html;
   } else {
     const rows=(pfExpenses||[]).filter(e=>String(e.n||'').trim()||e.a);
     if(!rows.length){ wrap.style.display='none'; body.innerHTML=''; return; }
     wrap.style.display='flex'; wrap.style.flexDirection='column';
-    const lines=rows.map(e=>`<div style="font-size:11px;color:var(--text-muted);margin-left:4px">${escHtml(e.n||'(項目名なし)')}：¥${(parseInt(e.a)||0).toLocaleString()}</div>`).join('');
+    let lines='';
+    if(rows.some(e=>e.d)){
+      // 日別グループ表示
+      const dates=[...new Set(rows.map(e=>e.d||''))].sort((a,b)=>String(a).localeCompare(String(b)));
+      dates.forEach(d=>{
+        lines+=`<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-top:4px">${d?_md(d):'その他'}</div>`;
+        rows.filter(e=>(e.d||'')===d).forEach(e=>{
+          lines+=`<div style="font-size:11px;color:var(--text-muted);margin-left:8px">${escHtml(e.n||'(項目名なし)')}：¥${(parseInt(e.a)||0).toLocaleString()}</div>`;
+        });
+      });
+    } else {
+      lines=rows.map(e=>`<div style="font-size:11px;color:var(--text-muted);margin-left:4px">${escHtml(e.n||'(項目名なし)')}：¥${(parseInt(e.a)||0).toLocaleString()}</div>`).join('');
+    }
     body.innerHTML=lines+`<div class="vendor-subtotal">諸経費 合計 ¥${expenseTotal(rows).toLocaleString()}</div>`;
   }
 }
@@ -5399,7 +5472,16 @@ function showViewFields(c){
   }
   if(_stVw) _stVw.style.display='none';
   if(isAdminView()){
-    setView('view-est', `¥${(c.est||0).toLocaleString()}`);
+    {
+      const _ed=c.estDaily||{};
+      const _edDays=Object.keys(_ed).filter(d=>(parseInt(_ed[d])||0)>0).sort();
+      if(_edDays.length){
+        const _md=ds=>{ const p=ds.split('-'); return parseInt(p[1],10)+'/'+parseInt(p[2],10); };
+        setView('view-est', `<div style="display:flex;flex-direction:column;gap:3px"><div>¥${(c.est||0).toLocaleString()} <span style="font-size:11px;color:var(--text-muted);font-weight:400">（日別合計）</span></div><div style="font-size:11px;color:var(--text-muted);line-height:1.8">${_edDays.map(d=>`${_md(d)}　¥${(parseInt(_ed[d])||0).toLocaleString()}`).join('<br>')}</div></div>`);
+      } else {
+        setView('view-est', `¥${(c.est||0).toLocaleString()}`);
+      }
+    }
   } else {
     // スタッフには見積・請求を完全非表示
     const ew=document.getElementById('ap-est-wrap'); if(ew) ew.style.display='none';
@@ -5517,6 +5599,8 @@ function showNewMode(showPanel=false){
   const apStatus=document.getElementById('ap-status'); if(apStatus) apStatus.value='未対応';
 
   highlightRange('','');
+  _pfEstDaily={};
+  renderEstDaily();
 }
 
 // ===== 案件票の左右スワイプ移動（同じ日の案件を前後に） =====
@@ -5612,7 +5696,10 @@ function openDetail(id, date){
   const _bcRow=document.getElementById('ap-barcolor-row'); if(_bcRow) _bcRow.style.display='none';
   document.getElementById('ap-status').value  =c.status;
   document.getElementById('ap-est').value     =c.est||'';
-  pfExpenses = (c.expenses||[]).map(e=>({n:e.n||'', a:e.a||0}));
+  _pfEstDaily = Object.assign({}, c.estDaily||{});
+  if(!Object.keys(_pfEstDaily).length && c.start&&c.end&&c.end>c.start && (parseInt(c.est)||0)>0){ _pfEstDaily[c.start]=parseInt(c.est)||0; }
+  { const _edw=document.getElementById('ap-est-daily'); if(_edw){ _edw.style.display='none'; _edw.innerHTML=''; } }
+  pfExpenses = (c.expenses||[]).map(e=>{ const o={n:e.n||'', a:e.a||0}; if(e.d) o.d=e.d; return o; });
   pfVendors = (c.vendors||[]).map(v=>{
     const days={};
     const raw=v.days||{};
@@ -5684,6 +5771,7 @@ function enterEditMode(){
   const _stEl2=document.getElementById('ap-status'); if(_stEl2) _stEl2.onchange=null;
   // 入力欄に切替
   showInputFields();
+  renderEstDaily();
   // ボタン
   document.getElementById('pf-new-actions').style.display='none';
   document.getElementById('pf-edit-actions').style.display='flex';
@@ -5725,7 +5813,11 @@ function pfSaveCase(){
   c.status   =document.getElementById('ap-status').value;
 
   c.memo     =document.getElementById('ap-memo')?.value||'';
-  if(isAdmin()) c.est=parseInt(document.getElementById('ap-est').value)||0;
+  if(isAdmin()){
+    _collectEstDailyInputs();
+    if(c.start&&c.end&&c.end>c.start){ c.estDaily=_estDailyTrim(c.start,c.end); c.est=Object.values(c.estDaily).reduce((a,b)=>a+b,0); }
+    else { c.estDaily={}; c.est=parseInt(document.getElementById('ap-est').value)||0; }
+  }
   syncVendorInputs();
   c.vendors  =collectVendors();
   c.expenses =collectExpenses();
@@ -6036,6 +6128,84 @@ function kintaiExportCSV(){
 
 // ===== 請求書・注文書（CSV出力） =====
 let billingExcluded = new Set();  // チェックを外した案件ID（既定は全選択）
+let billingClientFilter = null;   // 顧客絞り込み（null=全顧客）
+function billingRowsFiltered(){
+  const rows=billingRows();
+  return billingClientFilter?rows.filter(r=>r.client===billingClientFilter):rows;
+}
+function billingToggleClientFilter(gi){
+  const g=(window._billingGroups||[])[gi]; if(!g) return;
+  billingClientFilter=(billingClientFilter===g.client)?null:g.client;
+  renderBilling();
+}
+function billingClearClientFilter(){ billingClientFilter=null; renderBilling(); }
+let billingCollapsed = new Set();   // 閉じている顧客名
+function billingToggleCollapse(gi){
+  const g=(window._billingGroups||[])[gi]; if(!g) return;
+  if(billingCollapsed.has(g.client)) billingCollapsed.delete(g.client); else billingCollapsed.add(g.client);
+  renderBilling();
+}
+
+// ===== 帯案件の日別見積 =====
+let _pfEstDaily = {};
+function caseDayList(start,end){
+  const out=[]; if(!start) return out;
+  let d=new Date(start+'T00:00:00'); const de=new Date((end||start)+'T00:00:00');
+  if(isNaN(d.getTime())||isNaN(de.getTime())) return out;
+  let guard=0;
+  while(d<=de && guard<93){ out.push(fmtDate(d)); d.setDate(d.getDate()+1); guard++; }
+  return out;
+}
+function _estDailySum(){ return Object.values(_pfEstDaily).reduce((a,b)=>a+(parseInt(b)||0),0); }
+// 期間(start〜end)内の日だけを残した日別見積を返す（期間短縮時の残骸を除去）
+function _estDailyTrim(start,end){
+  const days=new Set(caseDayList(start,end));
+  const out={};
+  Object.keys(_pfEstDaily).forEach(d=>{ if(days.has(d)&&(parseInt(_pfEstDaily[d])||0)>0) out[d]=parseInt(_pfEstDaily[d]); });
+  return out;
+}
+function _estDailyInput(inp){
+  const d=inp.dataset.date; const v=parseInt(inp.value);
+  if(d){ if(v>0) _pfEstDaily[d]=v; else delete _pfEstDaily[d]; }
+  const t=document.getElementById('ap-est-daily-total');
+  if(t) t.textContent='合計 ¥'+_estDailySum().toLocaleString();
+}
+function _collectEstDailyInputs(){
+  document.querySelectorAll('#ap-est-daily .ap-est-day').forEach(inp=>{
+    const d=inp.dataset.date; if(!d) return;
+    const v=parseInt(inp.value);
+    if(v>0) _pfEstDaily[d]=v; else delete _pfEstDaily[d];
+  });
+}
+function renderEstDaily(){
+  const wrap=document.getElementById('ap-est-daily');
+  const single=document.getElementById('ap-est');
+  if(!wrap||!single) return;
+  const s=document.getElementById('ap-start')?.value||'';
+  const e=document.getElementById('ap-end')?.value||'';
+  const days=caseDayList(s,e);
+  if(days.length<2){ wrap.style.display='none'; wrap.innerHTML=''; single.style.display=''; return; }
+  const md=ds=>{ const p=ds.split('-'); return parseInt(p[1],10)+'/'+parseInt(p[2],10); };
+  single.style.display='none';
+  wrap.style.display='flex';
+  wrap.innerHTML = days.map(d=>`<div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--text-muted);width:44px;flex-shrink:0;text-align:right">${md(d)}</span>
+      <input class="pf-input ap-est-day" data-date="${d}" type="number" placeholder="0" value="${_pfEstDaily[d]||''}" style="flex:1" oninput="_estDailyInput(this)">
+    </div>`).join('')
+    + `<div id="ap-est-daily-total" style="font-size:11px;color:var(--text-muted);text-align:right">合計 ¥${_estDailySum().toLocaleString()}</div>`;
+  const noEdit=!canAdd();
+  wrap.querySelectorAll('.ap-est-day').forEach(el=>el.disabled=noEdit);
+}
+// 日付変更で日別欄を作り直す（編集/新規モード時のみ）
+(function(){
+  const bind=()=>{
+    ['ap-start','ap-end'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.addEventListener('change',()=>{ if(panelMode==='view') return; _collectEstDailyInputs(); renderEstDaily(); renderExpenses(true); });
+    });
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind); else bind();
+})();
 
 // 見積金額を数値化（"320,000"・"¥320,000"・未設定・空 → 数値/0）
 function parseEst(v){
@@ -6109,21 +6279,81 @@ function periodLabel(p){
   }
   return '全期間';
 }
+// 指定日の協力会社情報（会社名・作業員・その日の金額計）を返す（請求額には加算しない・表示用）
+function _vendorInfoForDates(c, dates){
+  const out=[];
+  (c.vendors||[]).forEach(v=>{
+    const m=getMember(v.id);
+    const name=m?m.name:(v.id?String(v.id):'');
+    if(!name) return;
+    let wTotal=0; const workers=[]; const expItems=[];
+    dates.forEach(d=>{
+      ((v.days&&v.days[d])||[]).forEach(w=>{ if(String(w.n||'').trim()) workers.push(String(w.n).trim()); wTotal+=parseInt(w.a)||0; });
+      ((v.dayExpenses&&v.dayExpenses[d])||[]).forEach(e=>{ if(String(e.n||'').trim()||parseInt(e.a)) expItems.push({n:String(e.n||'').trim()||'(項目名なし)', a:parseInt(e.a)||0}); });
+    });
+    if(!workers.length&&!wTotal&&!expItems.length) return;
+    out.push({name, workers:[...new Set(workers)], wTotal, expItems});
+  });
+  return out;
+}
+// 日別データが1つも無い協力会社（割当のみ）→ 名前だけ最初の行に出す
+function _vendorsWithoutDayData(c){
+  const out=[];
+  (c.vendors||[]).forEach(v=>{
+    const hasData=Object.keys(v.days||{}).some(d=>((v.days[d])||[]).some(w=>String(w.n||'').trim()||parseInt(w.a)))
+      || Object.keys(v.dayExpenses||{}).some(d=>((v.dayExpenses[d])||[]).some(e=>String(e.n||'').trim()||parseInt(e.a)));
+    if(hasData) return;
+    const m=getMember(v.id); if(!m) return;
+    out.push({name:m.name, workers:[], wTotal:0, expItems:[]});
+  });
+  return out;
+}
 function billingRows(){
   const range=getPeriodRange(billingPeriod.mode==='custom'?{mode:'custom',start:document.getElementById('bf-start')?.value||'',end:document.getElementById('bf-end')?.value||''}:billingPeriod);
-  return cases.filter(c=>inPeriod(c.start||'',range)).map(c=>{
-    const est=parseEst(c.est);
-    const exp=caseExpenseTotal(c);
-    const sub=est+exp;
-    const tax=Math.floor(sub*0.1);
+  const rows=[];
+  cases.forEach(c=>{
+    // 「休み」案件（勤怠と同じルール: 案件名に「休み」を含む）は請求対象外
+    if(String(c.name||'').includes('休み')) return;
+    const client=(c.client&&String(c.client).trim())||'（未設定）';
     const expenses=(c.expenses||[]).filter(e=>String(e.n||'').trim());
-    return {id:c.id, client:(c.client&&String(c.client).trim())||'（未設定）', date:c.start||'', name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses};
+    const expTotal=caseExpenseTotal(c);
+    const daily=c.estDaily||{};
+    const isBand=c.start&&c.end&&c.end>c.start;
+    if(isBand){
+      // 帯案件: 見積の有無に関わらず期間中の1日ごとに1行
+      const hasDaily=Object.keys(daily).some(d=>(parseInt(daily[d])||0)>0);
+      const dayList=caseDayList(c.start,c.end);
+      // 諸経費: 日付付きはその日へ、日付なし・期間外は最初の行へ（互換・計上漏れ防止）
+      const dated=expenses.filter(e=>e.d&&dayList.indexOf(e.d)>=0);
+      const firstExtra=expenses.filter(e=>!e.d||dayList.indexOf(e.d)===-1);
+      const days=dayList.filter(d=>inPeriod(d,range));
+      const vendNoData=_vendorsWithoutDayData(c);
+      let first=true;
+      days.forEach(d=>{
+        // 日別見積があればその日の額、無ければ従来の見積を初日にのみ計上（合計は不変）
+        const est=hasDaily?(parseInt(daily[d])||0):(d===c.start?parseEst(c.est):0);
+        const rowExpList=first?dated.filter(e=>e.d===d).concat(firstExtra):dated.filter(e=>e.d===d);
+        const exp=expenseTotal(rowExpList);
+        const sub=est+exp;
+        const tax=Math.floor(sub*0.1);
+        const vd=_vendorInfoForDates(c,[d]);
+        rows.push({id:String(c.id)+'@'+d, client, date:d, name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses:rowExpList, vend:(first?vd.concat(vendNoData):vd)});
+        first=false;
+      });
+    } else if(inPeriod(c.start||'',range)){
+      const est=parseEst(c.est);
+      const exp=expTotal;
+      const sub=est+exp;
+      const tax=Math.floor(sub*0.1);
+      rows.push({id:c.id, client, date:c.start||'', name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses, vend:_vendorInfoForDates(c,caseDayList(c.start,c.end)).concat(_vendorsWithoutDayData(c))});
+    }
   });
+  return rows;
 }
 // 顧客ごとにまとめ、顧客名順・グループ内は日付昇順
 function billingGroups(){
   const map={};
-  billingRows().forEach(r=>{ (map[r.client]=map[r.client]||[]).push(r); });
+  billingRowsFiltered().forEach(r=>{ (map[r.client]=map[r.client]||[]).push(r); });
   return Object.keys(map).sort((a,b)=>a.localeCompare(b,'ja')).map(cl=>({
     client:cl,
     items:map[cl].sort((a,b)=>String(a.date).localeCompare(String(b.date)))
@@ -6154,15 +6384,16 @@ function renderBilling(){
     const sel=g.items.filter(r=>!billingExcluded.has(r.id));
     const sub=sel.reduce((a,r)=>({est:a.est+r.est,exp:a.exp+r.exp,tax:a.tax+r.tax,total:a.total+r.total}),{est:0,exp:0,tax:0,total:0});
     const groupChecked=g.items.every(r=>!billingExcluded.has(r.id));
+    const collapsed=billingCollapsed.has(g.client);
     html+=`<tr style="background:#EEF3FD">
       <td style="padding:7px 6px;text-align:center;border-bottom:1px solid var(--border)"><input type="checkbox" ${groupChecked?'checked':''} onchange="billingToggleGroup(${gi},this.checked)"></td>
-      <td colspan="2" style="padding:7px 6px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:#1D4ED8">${escHtml(g.client)} <span style="font-size:10px;font-weight:400;color:var(--text-muted)">${sel.length}件</span></td>
+      <td colspan="2" onclick="billingToggleCollapse(${gi})" style="padding:7px 6px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:#1D4ED8;cursor:pointer;user-select:none"><span style="display:inline-block;width:14px;font-size:10px;color:var(--text-muted)">${collapsed?'▶':'▼'}</span><span onclick="event.stopPropagation();billingToggleClientFilter(${gi})" title="この顧客だけ表示" style="cursor:pointer;text-decoration:underline;text-underline-offset:3px">${escHtml(g.client)}</span> <span style="font-size:10px;font-weight:400;color:var(--text-muted)">${sel.length}件</span></td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.est)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.exp)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.tax)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.total)}</td>
     </tr>`;
-    g.items.forEach(r=>{
+    if(!collapsed) g.items.forEach(r=>{
       const chk=!billingExcluded.has(r.id);
       html+=`<tr>
         <td style="padding:7px 6px;text-align:center;border-bottom:1px solid #F0EEE8"><input type="checkbox" ${chk?'checked':''} onchange="billingToggle('${r.id}',this.checked)"></td>
@@ -6182,19 +6413,35 @@ function renderBilling(){
           </td>
         </tr>`;
       }
+      // 協力会社サブ行（情報表示のみ・請求額には加算しない）
+      if(r.vend&&r.vend.length){
+        html+=`<tr>
+          <td></td>
+          <td colspan="6" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:#B45309">
+            協力会社：${r.vend.map(v=>`${escHtml(v.name)}${v.workers.length?`（${v.workers.map(w=>escHtml(w)).join('・')}）`:''}${v.wTotal?` ¥${v.wTotal.toLocaleString()}`:''}${v.expItems&&v.expItems.length?`＋経費 ${v.expItems.map(e=>`${escHtml(e.n)} ¥${e.a.toLocaleString()}`).join('・')}`:''}`).join('　／　')}
+          </td>
+        </tr>`;
+      }
     });
   });
   html+='</tbody></table>';
-  list.innerHTML='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'+html+'</div>';
-  // 集計
-  const all=billingRows().filter(r=>!billingExcluded.has(r.id));
+  let banner='';
+  if(billingClientFilter){
+    banner=`<div style="display:flex;align-items:center;gap:10px;background:#EEF3FD;border:1px solid #93C5FD;border-radius:var(--radius);padding:8px 12px;margin-bottom:10px">
+      <span style="font-size:13px;font-weight:700;color:#1D4ED8">📄 ${escHtml(billingClientFilter)} の請求書</span>
+      <button onclick="billingClearClientFilter()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:var(--text)">✕ すべての顧客に戻る</button>
+    </div>`;
+  }
+  list.innerHTML=banner+'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'+html+'</div>';
+  // 集計（絞り込み中はその顧客のみ）
+  const all=billingRowsFiltered().filter(r=>!billingExcluded.has(r.id));
   const tot=all.reduce((a,r)=>({est:a.est+r.est,exp:a.exp+r.exp,tax:a.tax+r.tax,total:a.total+r.total}),{est:0,exp:0,tax:0,total:0});
   const clientsCount=new Set(all.map(r=>r.client)).size;
   if(sumEl) sumEl.innerHTML=
      `<span style="font-size:12px;color:var(--text-muted)">${periodLabel(billingPeriod)}｜選択 ${all.length}件 ／ ${clientsCount}社</span>`
     +`<span style="font-size:12px;color:var(--text)">見積 ${yen(tot.est)}＋諸経費 ${yen(tot.exp)}＋消費税 ${yen(tot.tax)} ＝ <span style="font-size:14px;font-weight:700">税込 ${yen(tot.total)}</span></span>`;
   const allChk=document.getElementById('billing-all');
-  if(allChk) allChk.checked=billingRows().every(r=>!billingExcluded.has(r.id));
+  if(allChk) allChk.checked=billingRowsFiltered().every(r=>!billingExcluded.has(r.id));
 }
 function billingToggle(id, checked){ if(checked) billingExcluded.delete(id); else billingExcluded.add(id); renderBilling(); }
 function billingToggleGroup(gi, checked){
@@ -6203,8 +6450,8 @@ function billingToggleGroup(gi, checked){
   renderBilling();
 }
 function billingToggleAll(checked){
-  if(checked) billingExcluded.clear();
-  else billingRows().forEach(r=>billingExcluded.add(r.id));
+  if(checked) billingRowsFiltered().forEach(r=>billingExcluded.delete(r.id));
+  else billingRowsFiltered().forEach(r=>billingExcluded.add(r.id));
   renderBilling();
 }
 function billingExportCSV(){
@@ -6647,7 +6894,12 @@ function renderMiniCal(){
       </div>
     </div>`;
   }
-  html += `</div></div>`;
+  html += `</div>`;
+  // 凡例（丸の色＝どのスタッフか）。管理者・経理が全員分を見るときのみ表示
+  if(isAdminView() && targetMembers.length){
+    html += `<div class="mini-cal-legend">${targetMembers.map(m=>`<span class="mini-legend-item"><span class="mini-legend-dot" style="background:${m.color}"></span>${escHtml(m.name||String(m.id||''))}</span>`).join('')}</div>`;
+  }
+  html += `</div>`;
   el.innerHTML = html;
 }
 
