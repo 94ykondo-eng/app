@@ -1008,7 +1008,7 @@
         <circle cx="6" cy="6" r="5" fill="none" stroke="#FCD34D" stroke-width="2"/>
         <path d="M6 1 A5 5 0 0 1 11 6" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      保存中…
+      <span id="save-indicator-text">保存中…</span>
     </div>
     <button class="logout-btn" id="bell-btn" onclick="toggleActivityPanel()" style="display:none;position:relative" title="お知らせ">🔔<span id="bell-badge" style="display:none;position:absolute;top:0;right:0;background:#EF4444;color:#fff;font-size:9px;font-weight:700;border-radius:99px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;transform:translate(30%,-30%)">0</span></button>
     <button class="logout-btn" id="sync-btn" onclick="reloadFromGAS()" style="display:none" title="スプレッドシートから最新データを取得">🔄 同期</button>
@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.35';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.36';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1959,9 +1959,21 @@ function endSave(){
   pendingSaves=Math.max(0,pendingSaves-1);
   updateSaveIndicator();
 }
+let pendingSyncs=0; // 同期中（GASからの読込中）の通信数
+function beginSync(){
+  pendingSyncs++;
+  updateSaveIndicator();
+}
+function endSync(){
+  pendingSyncs=Math.max(0,pendingSyncs-1);
+  updateSaveIndicator();
+}
 function updateSaveIndicator(){
   const el=document.getElementById('save-indicator');
-  if(el) el.style.display = pendingSaves>0 ? 'flex' : 'none';
+  const busy = pendingSaves>0 || pendingSyncs>0;
+  if(el) el.style.display = busy ? 'flex' : 'none';
+  const txt = document.getElementById('save-indicator-text');
+  if(txt) txt.textContent = pendingSaves>0 ? '保存中…' : (pendingSyncs>0 ? '同期中…' : '');
   // ログアウトボタンを保存中はグレーアウト
   const logoutBtns=document.querySelectorAll('.logout-btn:not(#sync-btn):not(#settings-btn):not(#panel-close-btn)');
   logoutBtns.forEach(btn=>{
@@ -2490,6 +2502,7 @@ async function loadFromGAS(){
     console.log('キャッシュから復元: '+cases.length+'件');
     // バックグラウンドで最新案件をGASから取得しdocs等を反映（他アカウントの変更を同期）
     setTimeout(async()=>{
+      beginSync();
       try{
         const casesData = await gasGet('getCases');
         if(casesData && Array.isArray(casesData) && casesData.length>0){
@@ -2514,12 +2527,14 @@ async function loadFromGAS(){
           console.log('[sync] バックグラウンドで案件を更新しました');
         }
       }catch(e){ console.warn('バックグラウンド同期スキップ'); }
+      finally{ endSync(); }
     },600);
     return;
   }
 
   // キャッシュなし（初回）→ GASから取得
   showLoadingOverlay(true);
+  beginSync();
   try{
     const casesData = await gasGet('getCases');
     if(casesData && Array.isArray(casesData) && casesData.length > 0){
@@ -2659,6 +2674,7 @@ window.debugVendors = async function(){
 async function reloadFromGAS(){
   isReloading = true;
   showLoadingOverlay(true);
+  beginSync();
 
   // ===== tryの外でバックアップ（例外発生時も確実に保護） =====
   const localCasesBackup  = [...cases];
@@ -2779,6 +2795,7 @@ async function reloadFromGAS(){
   }
 
   isReloading = false;
+  endSync();
   showLoadingOverlay(false);
 
   // 管理者がいない場合は初期設定画面へ
