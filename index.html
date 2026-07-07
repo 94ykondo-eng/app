@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.36';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.38';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2316,6 +2316,8 @@ document.addEventListener('input', e=>{
 
 // ===== Google Apps Script連携 =====
 let GAS_URL = 'https://script.google.com/macros/s/AKfycbx8cVqLwrzCdenGmtdEtP5S_y1HRknKtrKfmgNXtidTqR-dgvSRzaBzdFaVw_oeuFDscw/exec';
+// GAS側(gas-code.js)のAPP_TOKENと同じ値にすること。URLだけを知る第三者からのアクセスを防ぐための合言葉。
+const APP_TOKEN = '4d7dc43aaf0c0b0daf007f43302e1a418310eccf3dc650c2';
 
 // GAS GET: JSONPで取得（CORS回避）
 function gasGet(action){
@@ -2328,7 +2330,7 @@ function gasGet(action){
       resolve(data);
     };
     script.onerror = ()=>{ delete window[cbName]; document.head.removeChild(script); resolve(null); };
-    script.src = `${GAS_URL}?action=${action}&callback=${cbName}`;
+    script.src = `${GAS_URL}?action=${action}&token=${encodeURIComponent(APP_TOKEN)}&callback=${cbName}`;
     document.head.appendChild(script);
     // タイムアウト10秒
     setTimeout(()=>{
@@ -2351,7 +2353,7 @@ async function gasPost(data){
       await fetch(GAS_URL, {
         method:'POST',
         mode:'no-cors',
-        body: JSON.stringify(data)
+        body: JSON.stringify({...data, token: APP_TOKEN})
       });
       endSave();
       console.log('[gasPost] 完了 action:', data.action);
@@ -4124,7 +4126,7 @@ function populateCalUserSelect(){
   if(meIdx>=0) sel.selectedIndex=meIdx;
 }
 function buildCalUrl(){
-  let url = GAS_URL + '?action=ics';
+  let url = GAS_URL + '?action=ics&token=' + encodeURIComponent(APP_TOKEN);
   if(_calMode==='user'){
     const uid=document.getElementById('cal-user-select')?.value || '';
     if(uid) url += '&user=' + encodeURIComponent(uid);
@@ -4164,7 +4166,7 @@ async function settingsTestConnection(){
       const script = document.createElement('script');
       window[cb] = (data)=>{ delete window[cb]; document.head.removeChild(script); resolve(data); };
       script.onerror = ()=>{ delete window[cb]; document.head.removeChild(script); resolve(null); };
-      script.src = `${url}?action=getMembers&callback=${cb}`;
+      script.src = `${url}?action=getMembers&token=${encodeURIComponent(APP_TOKEN)}&callback=${cb}`;
       document.head.appendChild(script);
       setTimeout(()=>{ if(window[cb]){ delete window[cb]; resolve(null); }}, 8000);
     });
@@ -6496,43 +6498,68 @@ function billingExportCSV(){
 }
 
 // ===== 注文書発行（協力業者ごと・CSV出力） =====
+// 帯案件（複数日）は請求書と同じく期間内の1日ごとに1行へ展開する
 let orderExcluded = new Set();
 function orderRows(){
   const range=getPeriodRange(orderPeriod.mode==='custom'?{mode:'custom',start:document.getElementById('of-start')?.value||'',end:document.getElementById('of-end')?.value||''}:orderPeriod);
   const rows=[];
-  cases.filter(c=>inPeriod(c.start||'',range)).forEach(c=>{
+  cases.forEach(c=>{
+    const dayList=caseDayList(c.start,c.end);
+    if(!dayList.length) return;
     (c.vendors||[]).forEach((v,vi)=>{
       if(!v.id) return;
       const m=getMember(v.id);
-      let amt=0;
-      const days=v.days||{};
-      Object.keys(days).forEach(d=>{
-        let arr=days[d];
-        if(typeof arr==='string') arr=[];
-        if(Array.isArray(arr)) arr.forEach(w=>{ amt+=parseInt(w.a)||0; });
+      const vendorName=m?m.name:'(不明な業者)';
+
+      // 日別の作業員金額・氏名
+      const dayAmt={}, dayNames={};
+      let hasDaily=false;
+      Object.keys(v.days||{}).forEach(d=>{
+        let arr=v.days[d];
+        if(typeof arr==='string') arr=arr.trim()?[{n:arr.trim(),a:0}]:[];
+        if(!Array.isArray(arr)) arr=[];
+        const amtSum=arr.reduce((t,w)=>t+(parseInt(w.a)||0),0);
+        const names=arr.map(w=>String(w.n||'').trim()).filter(Boolean);
+        if(amtSum>0||names.length) hasDaily=true;
+        dayAmt[d]=amtSum; dayNames[d]=names;
       });
-      if(!amt && v.amt) amt=parseInt(v.amt)||0;
-      // 諸経費内訳（全日分を集約）
-      const expMap={};
+      // 旧データ互換: 日別データが無い場合は従来の合計金額(v.amt)を初日にのみ計上（合計は不変）
+      const fallbackAmt=(!hasDaily && v.amt)?(parseInt(v.amt)||0):0;
+
+      // 日別の諸経費（日付が案件期間内のものはその日へ、期間外・不明なものは最初の行にまとめて計上）
+      const dayExpMap={}, extraExpMap={};
       Object.keys(v.dayExpenses||{}).forEach(d=>{
         (v.dayExpenses[d]||[]).forEach(e=>{
-          const n=String(e.n||'').trim(); if(!n) return;
-          expMap[n]=(expMap[n]||0)+(parseInt(e.a)||0);
+          const n=String(e.n||'').trim(); const a=parseInt(e.a)||0;
+          if(!n && !a) return;
+          const label=n||'(項目名なし)';
+          const target=dayList.indexOf(d)>=0 ? (dayExpMap[d]=dayExpMap[d]||{}) : (extraExpMap.__extra__=extraExpMap.__extra__||{});
+          target[label]=(target[label]||0)+a;
         });
       });
-      const expenses=Object.keys(expMap).map(n=>({n, a:expMap[n]}));
-      const expAmt=expenses.reduce((t,e)=>t+e.a,0);
-      amt+=expAmt;
-      const tax=Math.floor(amt*0.1);
-      // 日別作業員情報（日付昇順）
-      const workerDays=Object.keys(v.days||{}).sort().map(d=>{
-        let arr=v.days[d];
-        if(typeof arr==='string') arr=arr.trim()?[{n:arr.trim()}]:[];
-        if(!Array.isArray(arr)) arr=[];
-        const names=arr.map(w=>String(w.n||'').trim()).filter(Boolean);
-        return names.length?{d, names}:null;
-      }).filter(Boolean);
-      rows.push({key:c.id+'__'+v.id+'__'+vi, vendorId:v.id, vendor:(m?m.name:'(不明な業者)'), date:c.start||'', name:c.name||'', amt, tax, total:amt+tax, expenses, workerDays});
+      const extraExpArr=Object.keys(extraExpMap.__extra__||{}).map(n=>({n, a:extraExpMap.__extra__[n]}));
+
+      const days=dayList.filter(d=>inPeriod(d,range));
+      if(!days.length) return;
+
+      let first=true;
+      days.forEach(d=>{
+        const workerAmt=hasDaily?(dayAmt[d]||0):(d===c.start?fallbackAmt:0);
+        const names=dayNames[d]||[];
+        let rowExpenses=Object.keys(dayExpMap[d]||{}).map(n=>({n, a:dayExpMap[d][n]}));
+        if(first && extraExpArr.length) rowExpenses=rowExpenses.concat(extraExpArr);
+        const expAmt=rowExpenses.reduce((t,e)=>t+e.a,0);
+        const amt=workerAmt+expAmt;
+        const tax=Math.floor(amt*0.1);
+        rows.push({
+          key:c.id+'__'+v.id+'__'+vi+'__'+d,
+          vendorId:v.id, vendor:vendorName, date:d, name:c.name||'',
+          amt, tax, total:amt+tax,
+          expenses:rowExpenses,
+          workerDays:names.length?[{d, names}]:[]
+        });
+        first=false;
+      });
     });
   });
   return rows;
@@ -6630,43 +6657,14 @@ function orderExportCSV(){
   const csvCell=v=>{ const s=String(v==null?'':v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   const lines=[['協力業者名','日付','案件名','作業員','支払金額(税抜)','諸経費内訳','消費税(10%)','税込金額'].map(csvCell).join(',')];
   let count=0;
+  // orderRows()が既に帯案件を1日ごとの行に展開済みなので、そのまま1行=1行で出力する
   orderGroups().forEach(g=>{
     g.items.forEach(r=>{
       if(orderExcluded.has(r.key)) return;
-      // 日付ごとに1行ずつ出力
-      const allDays=[...new Set([
-        ...(r.workerDays||[]).map(w=>w.d),
-        ...Object.keys(((() => {
-          const c=cases.find(x=>x.id===r.key.split('__')[0]);
-          const vi=parseInt(r.key.split('__')[2])||0;
-          const v=(c&&c.vendors||[])[vi];
-          return v&&v.dayExpenses||{};
-        })()))
-      ])].sort();
-      if(!allDays.length){
-        // 日付情報がない場合は従来通り1行
-        const expDetail=(r.expenses&&r.expenses.length)?r.expenses.map(e=>`${e.n||''}¥${(parseInt(e.a)||0).toLocaleString()}`).join(' / '):'';
-        const workerDetail=(r.workerDays&&r.workerDays.length)?r.workerDays.map(w=>`${w.d} ${w.names.join('・')}`).join(' / '):'';
-        lines.push([g.vendor,r.date,r.name,workerDetail,r.amt,expDetail,r.tax,r.total].map(csvCell).join(','));
-        count++; return;
-      }
-      // ケースとベンダーを特定
-      const caseObj=cases.find(x=>x.id===r.key.split('__')[0]);
-      const vIdx=parseInt(r.key.split('__')[2])||0;
-      const vObj=caseObj&&(caseObj.vendors||[])[vIdx];
-      allDays.forEach(d=>{
-        const wd=r.workerDays&&r.workerDays.find(w=>w.d===d);
-        const workers=wd?wd.names.join('・'):'';
-        const wAmt=vObj&&Array.isArray(vObj.days&&vObj.days[d])?vObj.days[d].reduce((t,w)=>t+(parseInt(w.a)||0),0):0;
-        const dayExps=vObj&&vObj.dayExpenses&&vObj.dayExpenses[d]||[];
-        const eAmt=dayExps.reduce((t,e)=>t+(parseInt(e.a)||0),0);
-        const dayAmt=wAmt+eAmt;
-        if(!dayAmt&&!workers) return; // 作業員も金額もない日はスキップ
-        const dayTax=Math.floor(dayAmt*0.1);
-        const expDetail=dayExps.filter(e=>String(e.n||'').trim()).map(e=>`${e.n||''}¥${(parseInt(e.a)||0).toLocaleString()}`).join(' / ');
-        lines.push([g.vendor,d,r.name,workers,dayAmt,expDetail,dayTax,dayAmt+dayTax].map(csvCell).join(','));
-        count++;
-      });
+      const workerDetail=(r.workerDays&&r.workerDays.length)?r.workerDays.map(w=>w.names.join('・')).join(' / '):'';
+      const expDetail=(r.expenses&&r.expenses.length)?r.expenses.map(e=>`${e.n||''}¥${(parseInt(e.a)||0).toLocaleString()}`).join(' / '):'';
+      lines.push([g.vendor,r.date,r.name,workerDetail,r.amt,expDetail,r.tax,r.total].map(csvCell).join(','));
+      count++;
     });
   });
   if(count===0){ alert('出力する明細が選択されていません'); return; }
