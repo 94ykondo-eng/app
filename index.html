@@ -969,7 +969,7 @@
       <input type="checkbox" id="login-remember" style="width:13px;height:13px;accent-color:var(--accent)">
       ログイン状態を保持する
     </label>
-    <button class="login-btn" onclick="doLogin()">ログイン</button>
+    <button class="login-btn" id="login-submit-btn" onclick="doLogin()">ログイン</button>
     <div class="app-version"></div>
 
   </div>
@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.46';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.47';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1727,25 +1727,33 @@ async function doLogin(){
   const remember = document.getElementById('login-remember')?.checked;
   if(!id || !pw){ alert('IDまたはパスワードが違います'); return; }
 
-  // パスワードはPOST本文で送信し（URL・ログに乗らない）、nonceでトークンを引き換える
-  const nonce = _randomNonce();
-  await gasPost({ action:'login', id, pw, nonce });
-  const res = await gasClaimLogin(nonce);
-  if(!res || !res.ok || !res.token){
-    alert(res===null ? '通信に失敗しました。電波状況を確認してください' : 'IDまたはパスワードが違います');
-    return;
+  // ボタンに押下フィードバック（無効化＋「ログイン中…」表示。二重送信も防止）
+  const _btn = document.getElementById('login-submit-btn');
+  const _setBusy = (on)=>{ if(!_btn) return; _btn.disabled = on; _btn.textContent = on ? 'ログイン中…' : 'ログイン'; _btn.style.opacity = on ? '0.65' : ''; _btn.style.cursor = on ? 'progress' : ''; };
+  _setBusy(true);
+  try{
+    // パスワードはPOST本文で送信し（URL・ログに乗らない）、nonceでトークンを引き換える
+    const nonce = _randomNonce();
+    await gasPost({ action:'login', id, pw, nonce });
+    const res = await gasClaimLogin(nonce);
+    if(!res || !res.ok || !res.token){
+      alert(res===null ? '通信に失敗しました。電波状況を確認してください' : 'IDまたはパスワードが違います');
+      return;
+    }
+    SESSION_TOKEN = res.token;
+    if(res.member) _upsertMember(res.member);   // startAppが参照するので先に反映
+    currentUser = id;
+
+    // 認証情報はセッショントークンのみ保存（パスワードは保存しない）
+    const authObj = JSON.stringify({ id, token: res.token, member: res.member || null });
+    try{ sessionStorage.setItem(LS_AUTH, authObj); }catch(e){}
+    if(remember){ try{ localStorage.setItem(LS_AUTH, authObj); }catch(e){} }
+    else { try{ localStorage.removeItem(LS_AUTH); }catch(e){} }
+
+    startApp();
+  } finally {
+    _setBusy(false);   // 成功時は画面が切り替わるが、次回のために元に戻しておく
   }
-  SESSION_TOKEN = res.token;
-  if(res.member) _upsertMember(res.member);   // startAppが参照するので先に反映
-  currentUser = id;
-
-  // 認証情報はセッショントークンのみ保存（パスワードは保存しない）
-  const authObj = JSON.stringify({ id, token: res.token, member: res.member || null });
-  try{ sessionStorage.setItem(LS_AUTH, authObj); }catch(e){}
-  if(remember){ try{ localStorage.setItem(LS_AUTH, authObj); }catch(e){} }
-  else { try{ localStorage.removeItem(LS_AUTH); }catch(e){} }
-
-  startApp();
 }
 
 async function tryAutoLogin(){
