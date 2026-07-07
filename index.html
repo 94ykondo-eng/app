@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.38';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.45';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1708,45 +1708,47 @@ function canViewCase(c){ return true; }
 
 const LS_AUTH = 'gemba_auth_v1';
 
-function doLogin(){
+// ===== パスワードのハッシュ化（ソルト付きSHA-256） =====
+// 保存形式: "sha256$<ソルト16進>$<ハッシュ16進>"。ソルトをpw文字列内に埋め込むため、
+// GAS側スプレッドシートに列を追加しなくても既存のpw列だけで保存・復元できる。
+async function _sha256Hex(text){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function hashPassword(pw){
+  const salt = [...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join('');
+  const hash = await _sha256Hex(salt + pw);
+  return `sha256$${salt}$${hash}`;
+}
+
+async function doLogin(){
   const id = document.getElementById('login-id').value.trim().toLowerCase();
   const pw = document.getElementById('login-pw').value;
   const remember = document.getElementById('login-remember')?.checked;
+  if(!id || !pw){ alert('IDまたはパスワードが違います'); return; }
 
-  // MEMBERSが空の場合→キャッシュから読み込みを試みる
-  if(MEMBERS.length === 0){
-    try{
-      const cached=localStorage.getItem('gemba_members_cache')||sessionStorage.getItem('gemba_members_cache');
-      if(cached){
-        const parsed=JSON.parse(cached);
-        if(Array.isArray(parsed)&&parsed.length>0){
-          MEMBERS.splice(0,MEMBERS.length,...parsed.map(m=>({
-            id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',
-            role:m.role||'field',pw:m.pw||'',
-            canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
-        canCabinet:m.canCabinet==='true'||m.canCabinet===true||m.role==='admin',
-            viewableMembers:m.viewableMembers&&m.viewableMembers!==''?m.viewableMembers.split(',').filter(Boolean):null,
-            abbr:m.abbr||''
-          })).filter(m=>m.id));
-        }
-      }
-    }catch(e){}
-    // それでも空なら初期設定へ
-    if(MEMBERS.length===0){ checkSetup(); return; }
+  // パスワードはPOST本文で送信し（URL・ログに乗らない）、nonceでトークンを引き換える
+  const nonce = _randomNonce();
+  await gasPost({ action:'login', id, pw, nonce });
+  const res = await gasClaimLogin(nonce);
+  if(!res || !res.ok || !res.token){
+    alert(res===null ? '通信に失敗しました。電波状況を確認してください' : 'IDまたはパスワードが違います');
+    return;
   }
-
-  const m = getMember(id);
-  if(!m || m.pw !== pw){ alert('IDまたはパスワードが違います'); return; }
-  if(remember){
-    try{ localStorage.setItem(LS_AUTH, JSON.stringify({id, pw})); }catch(e){}
-  } else {
-    try{ localStorage.removeItem(LS_AUTH); }catch(e){}
-  }
+  SESSION_TOKEN = res.token;
+  if(res.member) _upsertMember(res.member);   // startAppが参照するので先に反映
   currentUser = id;
+
+  // 認証情報はセッショントークンのみ保存（パスワードは保存しない）
+  const authObj = JSON.stringify({ id, token: res.token, member: res.member || null });
+  try{ sessionStorage.setItem(LS_AUTH, authObj); }catch(e){}
+  if(remember){ try{ localStorage.setItem(LS_AUTH, authObj); }catch(e){} }
+  else { try{ localStorage.removeItem(LS_AUTH); }catch(e){} }
+
   startApp();
 }
 
-function tryAutoLogin(){
+async function tryAutoLogin(){
   // 手動ログアウト直後はスキップ
   try{
     if(sessionStorage.getItem('gemba_manual_logout')==='1'){
@@ -1754,20 +1756,48 @@ function tryAutoLogin(){
       return false;
     }
   }catch(e){}
-  // 保存済み認証情報があれば自動ログイン
+  // 保存済みセッショントークンがあればサーバーで検証して自動ログイン
   try{
-    const saved = localStorage.getItem(LS_AUTH);
+    const saved = localStorage.getItem(LS_AUTH) || sessionStorage.getItem(LS_AUTH);
     if(!saved) return false;
-    const {id, pw} = JSON.parse(saved);
-    const m = getMember(id);
-    if(!m || m.pw !== pw){
-      localStorage.removeItem(LS_AUTH);
+    const auth = JSON.parse(saved);
+    // 旧形式（{id,pwHash} や {id,pw}）はトークンが無いので自動ログイン不可 → 手動ログインへ
+    if(!auth.token){
+      try{ localStorage.removeItem(LS_AUTH); sessionStorage.removeItem(LS_AUTH); }catch(e){}
+      if(auth.id) document.getElementById('login-id').value = auth.id;
       return false;
     }
+    SESSION_TOKEN = auth.token;
+    const res = await gasGet('whoami');
+
+    if(res && res.ok && res.member){
+      // オンライン: セッション有効。メンバー情報を最新化して保存
+      _upsertMember(res.member);
+      currentUser = String(res.member.id || auth.id);
+      const fresh = JSON.stringify({ id: currentUser, token: auth.token, member: res.member });
+      try{ if(localStorage.getItem(LS_AUTH)) localStorage.setItem(LS_AUTH, fresh); }catch(e){}
+      try{ if(sessionStorage.getItem(LS_AUTH)) sessionStorage.setItem(LS_AUTH, fresh); }catch(e){}
+    } else if(res === null){
+      // 通信失敗（オフラインの可能性）: トークンは破棄せず、キャッシュで暫定起動
+      const m = auth.member ? _upsertMember(auth.member) : getMember(auth.id);
+      if(!m){
+        // メンバー情報が無く安全に起動できない → トークンは保持したまま手動ログインへ
+        if(auth.id) document.getElementById('login-id').value = auth.id;
+        return false;
+      }
+      currentUser = String(auth.id);
+      console.warn('[auth] オフライン: 保存済みトークンとキャッシュで起動します');
+    } else {
+      // サーバーが明確にセッション無効を返した → クリアして手動ログインへ
+      SESSION_TOKEN = '';
+      try{ localStorage.removeItem(LS_AUTH); sessionStorage.removeItem(LS_AUTH); }catch(e){}
+      if(auth.id) document.getElementById('login-id').value = auth.id;
+      return false;
+    }
+
     const chk = document.getElementById('login-remember');
-    if(chk) chk.checked = true;
-    document.getElementById('login-id').value = id;
-    currentUser = id;
+    if(chk && localStorage.getItem(LS_AUTH)) chk.checked = true;
+    document.getElementById('login-id').value = currentUser;
     startApp();
     return true;
   }catch(e){ return false; }
@@ -2318,21 +2348,22 @@ document.addEventListener('input', e=>{
 let GAS_URL = 'https://script.google.com/macros/s/AKfycbx8cVqLwrzCdenGmtdEtP5S_y1HRknKtrKfmgNXtidTqR-dgvSRzaBzdFaVw_oeuFDscw/exec';
 // GAS側(gas-code.js)のAPP_TOKENと同じ値にすること。URLだけを知る第三者からのアクセスを防ぐための合言葉。
 const APP_TOKEN = '4d7dc43aaf0c0b0daf007f43302e1a418310eccf3dc650c2';
+let SESSION_TOKEN = '';   // ログイン成功時にサーバーから受け取るセッショントークン
 
 // GAS GET: JSONPで取得（CORS回避）
-function gasGet(action){
+// JSONP共通処理。extraはクエリ文字列（callbackは内部で付与）
+function _jsonp(extra){
   return new Promise((resolve)=>{
-    const cbName = 'gasCallback_'+Date.now();
+    const cbName = 'gasCallback_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
     const script = document.createElement('script');
     window[cbName] = (data)=>{
       delete window[cbName];
-      document.head.removeChild(script);
+      try{ document.head.removeChild(script); }catch(e){}
       resolve(data);
     };
-    script.onerror = ()=>{ delete window[cbName]; document.head.removeChild(script); resolve(null); };
-    script.src = `${GAS_URL}?action=${action}&token=${encodeURIComponent(APP_TOKEN)}&callback=${cbName}`;
+    script.onerror = ()=>{ delete window[cbName]; try{ document.head.removeChild(script); }catch(e){} resolve(null); };
+    script.src = `${GAS_URL}?${extra}&callback=${cbName}`;
     document.head.appendChild(script);
-    // タイムアウト10秒
     setTimeout(()=>{
       if(window[cbName]){
         delete window[cbName];
@@ -2341,6 +2372,41 @@ function gasGet(action){
       }
     }, 10000);
   });
+}
+// データ取得はセッショントークンで認証
+function gasGet(action){
+  return _jsonp(`action=${action}&session=${encodeURIComponent(SESSION_TOKEN||'')}`);
+}
+// ログイン: APP_TOKENゲート。成功で{ok,token,member}を返す
+// ランダムなnonce（32桁hex）
+function _randomNonce(){
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return [...a].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+// POSTで検証済みのnonceを提示し、セッショントークンを引き換える（GET）
+function gasClaimLogin(nonce){
+  return _jsonp(`action=claimLogin&token=${encodeURIComponent(APP_TOKEN)}&nonce=${encodeURIComponent(nonce)}`);
+}
+// 初期設定の要否（管理者が居るかの真偽のみ・セッション不要）
+function gasNeedsSetup(){
+  return _jsonp(`action=needsSetup&token=${encodeURIComponent(APP_TOKEN)}`);
+}
+// サーバーが返したメンバー（pwなし）をMEMBERSへ反映
+function _normalizeMember(m){
+  return {
+    id:String(m.id||''), name:m.name||'', color:m.color||'#6B7280', role:m.role||'field', pw:'',
+    canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
+    canCabinet:m.canCabinet==='true'||m.canCabinet===true||m.role==='admin',
+    viewableMembers:m.viewableMembers&&m.viewableMembers!==''?String(m.viewableMembers).split(',').filter(Boolean):null,
+    abbr:m.abbr||''
+  };
+}
+function _upsertMember(m){
+  const nm=_normalizeMember(m);
+  const i=MEMBERS.findIndex(x=>String(x.id)===nm.id);
+  if(i>=0) MEMBERS[i]=nm; else MEMBERS.push(nm);
+  return nm;
 }
 
 // GAS POST: no-corsで送信
@@ -2353,7 +2419,7 @@ async function gasPost(data){
       await fetch(GAS_URL, {
         method:'POST',
         mode:'no-cors',
-        body: JSON.stringify({...data, token: APP_TOKEN})
+        body: JSON.stringify({...data, token: APP_TOKEN, session: SESSION_TOKEN})
       });
       endSave();
       console.log('[gasPost] 完了 action:', data.action);
@@ -2581,7 +2647,7 @@ async function loadFromGAS(){
     const membersData = await gasGet('getMembers');
     if(membersData && Array.isArray(membersData) && membersData.length > 0){
       MEMBERS = membersData.map(m=>({
-        id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',role:m.role||'field',pw:m.pw||'pass123',canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
+        id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',role:m.role||'field',pw:'',canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
         canCabinet:m.canCabinet==='true'||m.canCabinet===true||m.role==='admin',viewableMembers:m.viewableMembers&&m.viewableMembers!==''?m.viewableMembers.split(',').filter(Boolean):null,abbr:m.abbr||''
       })).filter(m=>m.id);
       saveCacheLS();
@@ -2673,9 +2739,23 @@ window.debugVendors = async function(){
   console.log('ヒント: ②③でvendorsが空なら「GAS側に保存できていない」＝gas-code.jsの再デプロイが必要です。①にあって②に無いのが消失の原因です。');
 };
 
-async function reloadFromGAS(){
+// ===== フォアグラウンド復帰時の自動同期 =====
+let _lastAutoSyncAt = 0;
+function _onForegroundSync(){
+  // 表示状態になった時だけ（非表示化イベントは無視）
+  if(document.visibilityState !== 'visible') return;
+  // 未ログイン・同期中・保存待ちのときはスキップ（保存待ちは次回復帰時に再試行）
+  if(!currentUser || isReloading || pendingSyncs > 0 || pendingSaves > 0) return;
+  // 短時間の連続切替でGASを叩きすぎないよう、前回同期から30秒未満はスキップ
+  if(Date.now() - _lastAutoSyncAt < 30000) return;
+  reloadFromGAS(true); // 静かモード（全画面オーバーレイなし・ヘッダーの「同期中…」のみ）
+}
+document.addEventListener('visibilitychange', _onForegroundSync);
+
+async function reloadFromGAS(quiet){
   isReloading = true;
-  showLoadingOverlay(true);
+  _lastAutoSyncAt = Date.now();
+  if(!quiet) showLoadingOverlay(true);
   beginSync();
 
   // ===== tryの外でバックアップ（例外発生時も確実に保護） =====
@@ -2733,7 +2813,7 @@ async function reloadFromGAS(){
     const membersData = await gasGet('getMembers');
     if(membersData && Array.isArray(membersData) && membersData.length>0){
       MEMBERS = membersData.map(m=>({
-        id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',role:m.role||'field',pw:m.pw||'pass123',
+        id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',role:m.role||'field',pw:'',
         canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
         canCabinet:m.canCabinet==='true'||m.canCabinet===true||m.role==='admin',
         viewableMembers:m.viewableMembers&&m.viewableMembers!==''?m.viewableMembers.split(',').filter(Boolean):null,
@@ -2798,7 +2878,7 @@ async function reloadFromGAS(){
 
   isReloading = false;
   endSync();
-  showLoadingOverlay(false);
+  if(!quiet) showLoadingOverlay(false);
 
   // 管理者がいない場合は初期設定画面へ
   const hasAdmin = MEMBERS.some(m=>m.role==='admin');
@@ -3105,8 +3185,7 @@ async function checkSetup(){
     return;
   }
 
-  // キャッシュにない場合 → GASに問い合わせて既存メンバーを確認
-  // （新しい端末・初回アクセス時の対応）
+  // キャッシュに管理者がいない → サーバーへ「初期設定が必要か」だけ問い合わせる（メンバー情報は取得しない）
   document.getElementById('setup-screen').style.display='none';
   document.getElementById('login-screen').style.display='none';
   // ローディング表示
@@ -3116,30 +3195,20 @@ async function checkSetup(){
   loadDiv.innerHTML='<div style="font-size:28px">📋</div><div>データを確認中...</div>';
   document.body.appendChild(loadDiv);
 
+  let needsSetup = false;
   try{
-    const data=await gasGet('getMembers');
-    const remote=(Array.isArray(data)?data:(data?.members||data?.MEMBERS||[])).filter(m=>!demoIds.includes(String(m.id||'')));
-    if(remote.length>0){
-      // GASにメンバーがいる → キャッシュに保存してログイン画面へ
-      MEMBERS=remote.map(m=>({
-        id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',
-        role:m.role||'field',pw:m.pw||'',
-        canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
-        canCabinet:m.canCabinet==='true'||m.canCabinet===true||m.role==='admin',
-        viewableMembers:m.viewableMembers&&m.viewableMembers!==''?m.viewableMembers.split(',').filter(Boolean):null,
-        abbr:m.abbr||''
-      })).filter(m=>m.id);
-      saveCacheLS();
-      loadDiv.remove();
-      document.getElementById('login-screen').style.display='flex';
-      tryAutoLogin();
-      return;
-    }
-  }catch(e){ console.warn('GAS問い合わせ失敗:', e); }
+    const r = await gasNeedsSetup();
+    // 明示的に needsSetup:true のときだけ初期設定画面。通信失敗(null)や既存ありはログイン画面へ
+    needsSetup = !!(r && r.needsSetup === true);
+  }catch(e){ console.warn('needsSetup問い合わせ失敗:', e); needsSetup = false; }
 
-  // GASにもメンバーがいない → 初期設定画面へ
   loadDiv.remove();
-  document.getElementById('setup-screen').style.display='flex';
+  if(needsSetup){
+    document.getElementById('setup-screen').style.display='flex';
+  } else {
+    document.getElementById('login-screen').style.display='flex';
+    tryAutoLogin();
+  }
 }
 
 async function doSetup(){
@@ -3159,14 +3228,17 @@ async function doSetup(){
 
   // 管理者アカウントを作成
   const admin = {
-    id, name, color:'#2563EB', role:'admin', pw,
+    id, name, color:'#2563EB', role:'admin', pw: await hashPassword(pw),
     canAdd:true, viewableMembers:null
   };
   MEMBERS = [admin];
   saveCacheLS();
 
-  // GASに保存
-  await saveMember_GAS(admin);
+  // GASに保存（管理者不在時のみ通るブートストラップ用アクション）
+  await gasPost({ action:'setupAdmin', member:{
+    id: admin.id, name: admin.name, color: admin.color, role: admin.role, pw: admin.pw,
+    canAdd: 'true', canCabinet: 'true', viewableMembers: '', abbr: ''
+  }});
 
   // ログイン画面へ
   document.getElementById('setup-screen').style.display='none';
@@ -3854,11 +3926,15 @@ function doLogout(){
     return;
   }
   currentUser=null;
+  // サーバー側のセッションを破棄してトークンを消す
+  try{ if(SESSION_TOKEN) gasPost({ action:'logout' }); }catch(e){}
+  SESSION_TOKEN='';
   document.getElementById('app').style.display='none';
   try{
-    const saved=localStorage.getItem(LS_AUTH);
-    if(saved){ const {id}=JSON.parse(saved); document.getElementById('login-id').value=id; }
-    else document.getElementById('login-id').value='';
+    const saved=localStorage.getItem(LS_AUTH)||sessionStorage.getItem(LS_AUTH);
+    const savedId = saved ? JSON.parse(saved).id : '';
+    try{ localStorage.removeItem(LS_AUTH); sessionStorage.removeItem(LS_AUTH); }catch(e){}
+    document.getElementById('login-id').value = savedId || '';
   }catch(e){ document.getElementById('login-id').value=''; }
   document.getElementById('login-pw').value='';
   sessionStorage.setItem('gemba_manual_logout','1');
@@ -4012,7 +4088,7 @@ function renderColorPicker(){
     onclick="selectedColor='${c}';renderColorPicker()"></div>`).join('');
 }
 
-function saveMember(){
+async function saveMember(){
   if(roGuard()) return;
   try{
     const nameEl=document.getElementById('mm-name');
@@ -4042,7 +4118,7 @@ function saveMember(){
       if(!newId){ showMmError('⚠️ ログインIDを入力してください'); return; }
       if(!/^[a-z0-9_]+$/.test(newId)){ showMmError('⚠️ IDは英数字・アンダースコアのみ使用できます'); return; }
       if(newId!==oldId&&getMember(newId)){ showMmError(`⚠️ 「${newId}」はすでに使用されています`); return; }
-      if(pw){ if(pw.length<6){ showMmError('⚠️ パスワードは6文字以上にしてください'); return; } m.pw=pw; }
+      if(pw){ if(pw.length<6){ showMmError('⚠️ パスワードは6文字以上にしてください'); return; } m.pw=await hashPassword(pw); }
       if(newId!==oldId){
         m.id=newId;
         cases.forEach(c=>{ 
@@ -4060,7 +4136,7 @@ function saveMember(){
       if(!/^[a-z0-9_]+$/.test(id)){ showMmError('⚠️ IDは英数字・アンダースコアのみ使用できます（例: tanaka, staff1）'); return; }
       if(getMember(id)){ showMmError(`⚠️ 「${id}」はすでに使用されています。別のIDを入力してください`); return; }
       if(!isVendor && (!pw||pw.length<6)){ showMmError('⚠️ パスワードは6文字以上で入力してください'); return; }
-      const newMember={id,name,color:selectedColor,role,pw:(isVendor?(pw||'-'):pw),canAdd:_canAdd,canCabinet:_canCabinet,viewableMembers:_viewable,abbr:(document.getElementById('mm-abbr')?.value||'').trim()};
+      const newMember={id,name,color:selectedColor,role,pw:(isVendor?(pw||'-'):await hashPassword(pw)),canAdd:_canAdd,canCabinet:_canCabinet,viewableMembers:_viewable,abbr:(document.getElementById('mm-abbr')?.value||'').trim()};
       MEMBERS.push(newMember);
       saveMember_GAS(newMember);
     }
@@ -4166,12 +4242,15 @@ async function settingsTestConnection(){
       const script = document.createElement('script');
       window[cb] = (data)=>{ delete window[cb]; document.head.removeChild(script); resolve(data); };
       script.onerror = ()=>{ delete window[cb]; document.head.removeChild(script); resolve(null); };
-      script.src = `${url}?action=getMembers&token=${encodeURIComponent(APP_TOKEN)}&callback=${cb}`;
+      // セッション不要の疎通確認（GAS URL＋APP_TOKENの到達性のみを見る）
+      script.src = `${url}?action=needsSetup&token=${encodeURIComponent(APP_TOKEN)}&callback=${cb}`;
       document.head.appendChild(script);
       setTimeout(()=>{ if(window[cb]){ delete window[cb]; resolve(null); }}, 8000);
     });
-    if(result && Array.isArray(result)){
-      showSettingsStatus('ok',`✅ 接続成功！メンバー ${result.length}件 確認`);
+    if(result && typeof result.needsSetup === 'boolean'){
+      showSettingsStatus('ok','✅ 接続成功！GASに正しく到達できました');
+    } else if(result && result.error === 'unauthorized'){
+      showSettingsStatus('err','❌ 接続失敗：APP_TOKENがGAS側と一致していません');
     } else {
       showSettingsStatus('err','❌ 接続失敗：GASのURLまたは設定を確認してください');
     }
