@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.47';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.48';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1732,10 +1732,8 @@ async function doLogin(){
   const _setBusy = (on)=>{ if(!_btn) return; _btn.disabled = on; _btn.textContent = on ? 'ログイン中…' : 'ログイン'; _btn.style.opacity = on ? '0.65' : ''; _btn.style.cursor = on ? 'progress' : ''; };
   _setBusy(true);
   try{
-    // パスワードはPOST本文で送信し（URL・ログに乗らない）、nonceでトークンを引き換える
-    const nonce = _randomNonce();
-    await gasPost({ action:'login', id, pw, nonce });
-    const res = await gasClaimLogin(nonce);
+    // 1リクエスト完結でID/パスワードを検証し、セッショントークンを受け取る
+    const res = await gasLogin(id, pw);
     if(!res || !res.ok || !res.token){
       alert(res===null ? '通信に失敗しました。電波状況を確認してください' : 'IDまたはパスワードが違います');
       return;
@@ -2387,14 +2385,9 @@ function gasGet(action){
 }
 // ログイン: APP_TOKENゲート。成功で{ok,token,member}を返す
 // ランダムなnonce（32桁hex）
-function _randomNonce(){
-  const a = new Uint8Array(16);
-  crypto.getRandomValues(a);
-  return [...a].map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-// POSTで検証済みのnonceを提示し、セッショントークンを引き換える（GET）
-function gasClaimLogin(nonce){
-  return _jsonp(`action=claimLogin&token=${encodeURIComponent(APP_TOKEN)}&nonce=${encodeURIComponent(nonce)}`);
+// 1リクエスト完結のログイン（他のgasGetと同じJSONP方式で確実）。成功で{ok,token,member}を返す
+function gasLogin(id, pw){
+  return _jsonp(`action=login&token=${encodeURIComponent(APP_TOKEN)}&id=${encodeURIComponent(id)}&pw=${encodeURIComponent(pw)}`);
 }
 // 初期設定の要否（管理者が居るかの真偽のみ・セッション不要）
 function gasNeedsSetup(){
