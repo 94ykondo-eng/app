@@ -45,7 +45,7 @@
   .setup-error{font-size:12px;color:var(--danger);margin-bottom:10px;display:none}
 
   /* ログイン */
-  #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,44px));box-sizing:border-box}
+  #login-screen{display:none;align-items:center;justify-content:center;min-height:100vh;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,44px));box-sizing:border-box}
   @media(max-width:768px){.login-card{width:100%;max-width:360px;padding:28px 20px}}
   .login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;width:360px}
   .login-logo{font-size:20px;font-weight:700;margin-bottom:4px}
@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.45';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.46';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3177,24 +3177,28 @@ async function checkSetup(){
   MEMBERS=MEMBERS.filter(m=>!demoIds.includes(m.id));
   saveCacheLS();
 
-  // キャッシュに管理者がいればそのままログイン画面へ
+  // 起動判定中はスピナーを表示（ログイン画面のちらつき防止）
+  showLoadingOverlay(true);
+  const _showLogin = ()=>{ document.getElementById('setup-screen').style.display='none'; document.getElementById('login-screen').style.display='flex'; showLoadingOverlay(false); };
+  const _showSetup = ()=>{ document.getElementById('login-screen').style.display='none'; document.getElementById('setup-screen').style.display='flex'; showLoadingOverlay(false); };
+  // 保存トークンの有無（自動ログインを試すか）
+  let hasToken=false;
+  try{ const s=localStorage.getItem(LS_AUTH)||sessionStorage.getItem(LS_AUTH); hasToken=!!(s&&JSON.parse(s).token); }catch(e){}
+
+  // キャッシュに管理者がいる場合
   if(MEMBERS.some(m=>m.role==='admin')){
     document.getElementById('setup-screen').style.display='none';
-    document.getElementById('login-screen').style.display='flex';
-    tryAutoLogin();
+    if(hasToken){
+      // 自動ログインの結果を待ってから画面を決める（成功ならスピナー→アプリ、失敗時のみログイン画面）
+      let ok=false; try{ ok=await tryAutoLogin(); }catch(e){}
+      if(ok) showLoadingOverlay(false); else _showLogin();
+    } else {
+      _showLogin(); tryAutoLogin(); // トークン無し→即false（旧形式の後始末のみ）
+    }
     return;
   }
 
   // キャッシュに管理者がいない → サーバーへ「初期設定が必要か」だけ問い合わせる（メンバー情報は取得しない）
-  document.getElementById('setup-screen').style.display='none';
-  document.getElementById('login-screen').style.display='none';
-  // ローディング表示
-  const loadDiv=document.createElement('div');
-  loadDiv.id='init-loading';
-  loadDiv.style.cssText='position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-size:14px;color:#6B7280;background:var(--bg)';
-  loadDiv.innerHTML='<div style="font-size:28px">📋</div><div>データを確認中...</div>';
-  document.body.appendChild(loadDiv);
-
   let needsSetup = false;
   try{
     const r = await gasNeedsSetup();
@@ -3202,12 +3206,13 @@ async function checkSetup(){
     needsSetup = !!(r && r.needsSetup === true);
   }catch(e){ console.warn('needsSetup問い合わせ失敗:', e); needsSetup = false; }
 
-  loadDiv.remove();
-  if(needsSetup){
-    document.getElementById('setup-screen').style.display='flex';
+  if(needsSetup){ _showSetup(); return; }
+  // ログイン（トークンがあれば自動ログインの結果を待ってから）
+  if(hasToken){
+    let ok=false; try{ ok=await tryAutoLogin(); }catch(e){}
+    if(ok) showLoadingOverlay(false); else _showLogin();
   } else {
-    document.getElementById('login-screen').style.display='flex';
-    tryAutoLogin();
+    _showLogin(); tryAutoLogin();
   }
 }
 
