@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.49';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.50';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1735,7 +1735,13 @@ async function doLogin(){
     // 1リクエスト完結でID/パスワードを検証し、セッショントークンを受け取る
     const res = await gasLogin(id, pw);
     if(!res || !res.ok || !res.token){
-      alert(res===null ? '通信に失敗しました。電波状況を確認してください' : 'IDまたはパスワードが違います');
+      if(res === null){
+        alert(_lastJsonpFail === 'error'
+          ? 'サーバーに接続できませんでした。ネットワーク環境（VPN・フィルタリング等）をご確認ください'
+          : 'サーバーから応答がありません（時間切れ）。時間をおいて再度お試しください');
+      } else {
+        alert('IDまたはパスワードが違います');
+      }
       return;
     }
     SESSION_TOKEN = res.token;
@@ -2358,6 +2364,7 @@ let SESSION_TOKEN = '';   // ログイン成功時にサーバーから受け取
 
 // GAS GET: JSONPで取得（CORS回避）
 // JSONP共通処理。extraはクエリ文字列（callbackは内部で付与）
+let _lastJsonpFail = '';   // 直近のJSONP失敗理由（'error'=読み込み失敗 / 'timeout'=時間切れ）
 function _jsonp(extra, timeoutMs){
   return new Promise((resolve)=>{
     const cbName = 'gasCallback_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
@@ -2367,11 +2374,12 @@ function _jsonp(extra, timeoutMs){
       try{ document.head.removeChild(script); }catch(e){}
       resolve(data);
     };
-    script.onerror = ()=>{ delete window[cbName]; try{ document.head.removeChild(script); }catch(e){} resolve(null); };
+    script.onerror = ()=>{ _lastJsonpFail='error'; delete window[cbName]; try{ document.head.removeChild(script); }catch(e){} resolve(null); };
     script.src = `${GAS_URL}?${extra}&callback=${cbName}`;
     document.head.appendChild(script);
     setTimeout(()=>{
       if(window[cbName]){
+        _lastJsonpFail='timeout';
         delete window[cbName];
         try{ document.head.removeChild(script); }catch(e){}
         resolve(null);
@@ -2385,10 +2393,14 @@ function gasGet(action){
 }
 // ログイン: APP_TOKENゲート。成功で{ok,token,member}を返す
 // ランダムなnonce（32桁hex）
-// 1リクエスト完結のログイン（他のgasGetと同じJSONP方式で確実）。成功で{ok,token,member}を返す
-// GASの初回起動（コールドスタート）が遅いことがあるため、ログインだけ長め（25秒）に待つ
-function gasLogin(id, pw){
-  return _jsonp(`action=login&token=${encodeURIComponent(APP_TOKEN)}&id=${encodeURIComponent(id)}&pw=${encodeURIComponent(pw)}`, 25000);
+// 1リクエスト完結のログイン。GASへの到達が断続的に失敗することがあるため、最大3回まで自動リトライする
+async function gasLogin(id, pw){
+  for(let attempt = 1; attempt <= 3; attempt++){
+    const res = await _jsonp(`action=login&token=${encodeURIComponent(APP_TOKEN)}&id=${encodeURIComponent(id)}&pw=${encodeURIComponent(pw)}`, attempt === 1 ? 25000 : 15000);
+    if(res !== null) return res;   // 応答が返れば成功/失敗を問わず確定
+    console.warn('[login] 試行'+attempt+'失敗:', _lastJsonpFail);
+  }
+  return null;
 }
 // 初期設定の要否（管理者が居るかの真偽のみ・セッション不要）
 function gasNeedsSetup(){
