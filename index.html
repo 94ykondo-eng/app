@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.56';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.65';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2760,6 +2760,7 @@ async function loadFromGAS(){
   buildMemberFilters();
   renderCal();
   setTimeout(checkUnsubmittedReports, 800);
+  loadMonthGoal();
 }
 
 // GASから強制再読込（手動更新ボタン用）
@@ -2951,6 +2952,7 @@ async function reloadFromGAS(quiet){
   const _sb2=document.getElementById('settings-btn');
   if(_sb2) _sb2.style.display=isAdmin()?'inline-block':'none';
   setTimeout(checkUnsubmittedReports, 800);
+  loadMonthGoal();
 }
 
 // ローディングオーバーレイ
@@ -7093,6 +7095,7 @@ function renderDailyReportCard(r, m){
     ${r.note?`<div style="font-size:12px;background:var(--bg);border-radius:6px;padding:6px 8px;margin-top:6px;color:var(--text-muted)">📌 ${escHtml(r.note)}</div>`:''}
     ${GROWTH_FIELDS.some(f=>r.growth?.[f.key])?`
       <div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:8px">
+            ${MONTH_GOAL?`<div class="growth-row"><div class="growth-label" style="color:#0EA5E9">月間目標</div><div class="growth-val">${escHtml(MONTH_GOAL)}${MONTH_GOAL_DETAIL?` <button onclick="showMonthGoalDetail()" style="margin-left:6px;border:1px solid #0EA5E9;background:none;color:#0EA5E9;border-radius:99px;padding:1px 10px;font-size:10px;font-weight:600;cursor:pointer;vertical-align:middle">詳細</button>`:''}</div></div>`:''}
         ${GROWTH_FIELDS.filter(f=>r.growth?.[f.key]).map(f=>`
           <div class="growth-row"><div class="growth-label" style="color:${f.color}">${f.label}</div><div class="growth-val">${escHtml(r.growth[f.key])}</div></div>`).join('')}
       </div>`:''}
@@ -7172,6 +7175,7 @@ function renderDaily(){
         ${r.note?`<div style="font-size:12px;background:var(--bg);border-radius:6px;padding:6px 8px;margin-top:6px;color:var(--text-muted)">📌 ${escHtml(r.note)}</div>`:''}
         ${GROWTH_FIELDS.some(f=>r.growth?.[f.key])?`
           <div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:8px">
+            ${MONTH_GOAL?`<div class="growth-row"><div class="growth-label" style="color:#0EA5E9">月間目標</div><div class="growth-val">${escHtml(MONTH_GOAL)}${MONTH_GOAL_DETAIL?` <button onclick="showMonthGoalDetail()" style="margin-left:6px;border:1px solid #0EA5E9;background:none;color:#0EA5E9;border-radius:99px;padding:1px 10px;font-size:10px;font-weight:600;cursor:pointer;vertical-align:middle">詳細</button>`:''}</div></div>`:''}
             ${GROWTH_FIELDS.filter(f=>r.growth?.[f.key]).map(f=>`
               <div class="growth-row"><div class="growth-label" style="color:${f.color}">${f.label}</div><div class="growth-val">${escHtml(r.growth[f.key])}</div></div>`).join('')}
           </div>`:''}
@@ -7196,6 +7200,18 @@ function renderDaily(){
   let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
     <span style="font-size:15px;font-weight:700">📊 日報一覧</span>
     <button onclick="openPdfModal()" style="margin-left:auto;border:1px solid var(--accent);background:none;color:var(--accent);border-radius:var(--radius);padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">📄 PDF出力</button>
+  </div>`;
+  // 月間目標の設定（管理者のみ・全スタッフ共通・設定するまで継続）
+  html += `<div style="border:1px solid #BAE6FD;border-radius:12px;padding:14px;margin-bottom:14px;background:#F0F9FF">
+    <div style="font-size:13px;font-weight:700;color:#0369A1;margin-bottom:6px">🎯 月間目標（全スタッフ共通）</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.5">ここで設定した目標が、各スタッフの日報に表示されます（スタッフは編集できません）。変更するまで同じ内容が継続します。</div>
+    <textarea id="admin-month-goal" placeholder="月間目標を入力…" style="width:100%;box-sizing:border-box;font-size:13px;min-height:60px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);resize:vertical">${escHtml(MONTH_GOAL)}</textarea>
+    <div style="font-size:11px;font-weight:600;color:#0369A1;margin:10px 0 4px">詳細（スタッフが「詳細」ボタンで確認できます）</div>
+    <textarea id="admin-month-goal-detail" placeholder="目標の背景・具体的な取り組み方など、詳しい説明を入力…" style="width:100%;box-sizing:border-box;font-size:13px;min-height:80px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);resize:vertical">${escHtml(MONTH_GOAL_DETAIL)}</textarea>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+      <button onclick="saveMonthGoal()" style="border:none;background:#0EA5E9;color:#fff;border-radius:var(--radius);padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer">保存する</button>
+      <span id="month-goal-status" style="font-size:12px;color:#059669"></span>
+    </div>
   </div>`;
   html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px">
     <button onclick="adminDailyChangeDate(-1)" style="border:none;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);padding:0 4px">‹</button>
@@ -7243,6 +7259,7 @@ function renderDaily(){
         ${r.note?`<div style="font-size:12px;background:var(--bg);border-radius:6px;padding:6px 8px;margin-top:6px;color:var(--text-muted)">📌 ${escHtml(r.note)}</div>`:''}
         ${GROWTH_FIELDS.some(f=>r.growth?.[f.key])?`
           <div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:8px">
+            ${MONTH_GOAL?`<div class="growth-row"><div class="growth-label" style="color:#0EA5E9">月間目標</div><div class="growth-val">${escHtml(MONTH_GOAL)}${MONTH_GOAL_DETAIL?` <button onclick="showMonthGoalDetail()" style="margin-left:6px;border:1px solid #0EA5E9;background:none;color:#0EA5E9;border-radius:99px;padding:1px 10px;font-size:10px;font-weight:600;cursor:pointer;vertical-align:middle">詳細</button>`:''}</div></div>`:''}
             ${GROWTH_FIELDS.filter(f=>r.growth?.[f.key]).map(f=>`
               <div class="growth-row"><div class="growth-label" style="color:${f.color}">${f.label}</div><div class="growth-val">${escHtml(r.growth[f.key])}</div></div>`).join('')}
           </div>`:''}
@@ -7526,8 +7543,67 @@ document.addEventListener('click', e=>{
 
 // ===== メンバー管理 =====
 
+// 月間目標をGASから取得してキャッシュ。取得できたら日報系の画面を更新
+async function loadMonthGoal(){
+  try{
+    const res = await gasGet('getMonthGoal');
+    if(res && typeof res.goal === 'string'){
+      MONTH_GOAL = res.goal;
+      MONTH_GOAL_DETAIL = typeof res.detail === 'string' ? res.detail : '';
+      try{ localStorage.setItem('gemba_month_goal', MONTH_GOAL); localStorage.setItem('gemba_month_goal_detail', MONTH_GOAL_DETAIL); }catch(e){}
+      // 表示中なら反映
+      if(document.getElementById('report-view')?.style.display!=='none' && typeof renderReportView==='function'){ renderReportView(); }
+      if(document.getElementById('daily-view')?.style.display!=='none' && typeof renderDaily==='function'){ renderDaily(); }
+    }
+  }catch(e){ /* 取得失敗時はキャッシュのMONTH_GOALを維持 */ }
+}
+
+// 月間目標を保存（管理者のみ）。全スタッフの日報に反映される
+function saveMonthGoal(){
+  if(roGuard()) return;
+  if(!isAdmin()){ alert('月間目標を設定できるのは管理者のみです'); return; }
+  const ta = document.getElementById('admin-month-goal');
+  if(!ta) return;
+  MONTH_GOAL = ta.value.trim();
+  MONTH_GOAL_DETAIL = (document.getElementById('admin-month-goal-detail')?.value||'').trim();
+  try{
+    localStorage.setItem('gemba_month_goal', MONTH_GOAL);
+    localStorage.setItem('gemba_month_goal_detail', MONTH_GOAL_DETAIL);
+  }catch(e){}
+  gasPost({ action:'setMonthGoal', goal: MONTH_GOAL, detail: MONTH_GOAL_DETAIL });
+  const st = document.getElementById('month-goal-status');
+  if(st){ st.textContent = '✓ 保存しました'; setTimeout(()=>{ if(st) st.textContent=''; }, 2500); }
+}
+
+// 月間目標の詳細をポップアップで表示（スタッフの「詳細」ボタン用）
+function showMonthGoalDetail(){
+  let ov = document.getElementById('month-goal-detail-overlay');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'month-goal-detail-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
+    ov.onclick = (e)=>{ if(e.target===ov) ov.style.display='none'; };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `<div style="background:var(--surface);border-radius:14px;padding:20px;width:min(420px,92vw);max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.25)">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+      <span style="font-size:14px;font-weight:700;color:#0369A1">🎯 月間目標</span>
+    </div>
+    <div style="font-size:13px;font-weight:600;line-height:1.6;white-space:pre-wrap;word-break:break-word;background:#F0F9FF;border-radius:8px;padding:10px 12px;margin-bottom:12px">${escHtml(MONTH_GOAL||'')}</div>
+    <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px">詳細</div>
+    <div style="font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-word;color:var(--text)">${escHtml(MONTH_GOAL_DETAIL||'')}</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button onclick="document.getElementById('month-goal-detail-overlay').style.display='none'" style="border:1px solid var(--border);background:none;border-radius:var(--radius);padding:8px 20px;font-size:13px;cursor:pointer;color:var(--text)">閉じる</button>
+    </div>
+  </div>`;
+  ov.style.display = 'flex';
+}
+
 // ===== 日報報告機能 =====
 let DAILY_REPORTS = [];
+// 月間目標（全スタッフ共通・管理者が設定・スタッフは閲覧のみ）。起動時はキャッシュから復元
+let MONTH_GOAL = (()=>{ try{ return localStorage.getItem('gemba_month_goal')||''; }catch(e){ return ''; } })();
+let MONTH_GOAL_DETAIL = (()=>{ try{ return localStorage.getItem('gemba_month_goal_detail')||''; }catch(e){ return ''; } })();
 // 写真データ: {id, caseId, caseName, fileId, thumbUrl, viewUrl, uploadedBy, uploadedAt, fileName}
 let CASE_PHOTOS = [];
 // 資料データ（URL方式）: {id, caseId, caseName, fileName, url, uploadedBy, uploadedAt}
@@ -7547,6 +7623,7 @@ let STAMPS = [
 let STAMP_REACTIONS = [];
 
 const GROWTH_FIELDS = [
+  {key:'monthResult',    label:'月間目標の結果とその理由',     color:'#0D9488', desc:'今月の月間目標に対して、意識した・行動した結果どうなったかを入力'},
   {key:'weekGoal',       label:'今週の行動目標',               color:'#3B82F6', desc:'今週毎日意識する又は、行う行動をシンプルに書く'},
   {key:'goalResult',     label:'行動目標の結果とその理由',     color:'#10B981', desc:'意識した・行動した結果どうなったかを入力'},
   {key:'insight',        label:'気付き',                       color:'#F59E0B'},
@@ -7584,7 +7661,19 @@ function _lastWeekGoal(beforeDate){
 }
 
 function rpClearGrowthError(){
-  // 全項目が入力されたらエラーを非表示
+  // 入力のたびに全項目を見て、空なら赤枠＋必須表示、埋まっていれば解除（消したら赤枠が戻る）
+  GROWTH_FIELDS.forEach(f=>{
+    const el = document.getElementById(`rp-g-${f.key}`);
+    if(!el || el.disabled) return;   // 提出済み（disabled）は対象外
+    const filled = !!el.value.trim();
+    el.style.borderColor = filled ? '' : '#FCA5A5';
+    const item = document.getElementById(`rp-item-${f.key}`);
+    if(item) item.style.background = filled ? '' : '#FFF8F8';
+    const req = document.getElementById(`rp-required-${f.key}`);
+    // 「今週の行動目標」は必須ラベルを常に表示（埋まっていても消さない）。他項目は空のときだけ表示
+    if(req) req.style.display = (f.key==='weekGoal' ? false : filled) ? 'none' : '';
+  });
+  // 全項目が入力されたらエラーメッセージを非表示
   const allFilled = GROWTH_FIELDS.every(f=>{
     const el = document.getElementById(`rp-g-${f.key}`);
     return el && el.value.trim();
@@ -7592,15 +7681,6 @@ function rpClearGrowthError(){
   if(allFilled){
     const errEl = document.getElementById('rp-growth-error');
     if(errEl) errEl.style.display = 'none';
-    // 入力済みの項目のハイライトを解除
-    GROWTH_FIELDS.forEach(f=>{
-      const el = document.getElementById(`rp-g-${f.key}`);
-      if(el && el.value.trim()){
-        el.style.borderColor='';
-        const item = el.closest('.rp-growth-item');
-        if(item) item.style.background='';
-      }
-    });
   }
 }
 
@@ -8013,17 +8093,28 @@ function renderReportView(){
     </div>
     <div class="rp-accordion-body open" id="rp-acc-growth-body">
       <div class="rp-progress-bar"><div class="rp-progress-fill" id="rp-growth-progress" style="width:${Math.round(filledGrowth/totalGrowth*100)}%"></div></div>
-      <div style="font-size:10px;color:var(--text-muted);margin-bottom:10px;text-align:right">${filledGrowth}/${totalGrowth}項目入力済み</div>
+      <div id="rp-growth-count-text" style="font-size:10px;color:var(--text-muted);margin-bottom:10px;text-align:right">${filledGrowth}/${totalGrowth}項目入力済み</div>
       <div id="rp-growth-error" style="display:none;background:#FEE2E2;color:#991B1B;border-radius:var(--radius);padding:8px 12px;font-size:12px;margin-bottom:10px;line-height:1.8"></div>`;
+
+  // 月間目標（管理者が設定・スタッフは閲覧のみ）を、成長記録の先頭に読み取り専用で表示
+  html += `<div class="rp-growth-item" style="border-left-color:#0EA5E9;background:#F0F9FF">
+      <div class="rp-growth-lbl" style="display:flex;align-items:center;gap:4px;color:#0EA5E9">
+        月間目標<span style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:4px">（管理者が設定）</span>
+      </div>
+      <div style="font-size:13px;line-height:1.6;padding:8px 2px 2px;color:var(--text);white-space:pre-wrap;word-break:break-word">${MONTH_GOAL?escHtml(MONTH_GOAL):'<span style=\"color:var(--text-muted)\">まだ設定されていません</span>'}</div>
+      ${MONTH_GOAL_DETAIL?`<div style="margin-top:8px"><button onclick="showMonthGoalDetail()" style="border:1px solid #0EA5E9;background:none;color:#0EA5E9;border-radius:99px;padding:3px 14px;font-size:11px;font-weight:600;cursor:pointer">詳細</button></div>`:''}
+    </div>`;
 
   GROWTH_FIELDS.forEach(f=>{
     let val = existing?.growth?.[f.key]||'';
     // 「今週の行動目標」だけは、未提出で空欄なら前回の日報から引き継ぐ（毎日同じ目標を打ち直す手間をなくす）
     if(f.key==='weekGoal' && !val && !submitted){ val = _lastWeekGoal(ds); }
     const isEmpty = !submitted && !val;
-    html += `<div class="rp-growth-item" style="border-left-color:${f.color}${isEmpty?';background:#FFF8F8':''}">
+    // 「今週の行動目標」は毎日見直す項目なので、内容が入っていても必須ラベルを常に表示（提出済みは除く）
+    const showRequired = f.key==='weekGoal' ? !submitted : isEmpty;
+    html += `<div class="rp-growth-item" id="rp-item-${f.key}" style="border-left-color:${f.color}${isEmpty?';background:#FFF8F8':''}">
       <div class="rp-growth-lbl" style="display:flex;align-items:center;gap:4px;color:${f.color}">
-        ${f.label}${isEmpty?'<span style="font-size:10px;color:#EF4444;margin-left:4px">必須</span>':''}
+        ${f.label}<span id="rp-required-${f.key}" style="font-size:10px;color:#EF4444;margin-left:4px;${showRequired?'':'display:none'}">必須</span>
       </div>
       ${f.desc?`<div style="font-size:10px;color:var(--text-muted);margin:2px 0 4px;line-height:1.5">${f.desc}</div>`:''}
       <textarea class="rp-textarea" id="rp-g-${f.key}" placeholder="入力してください…"
@@ -8084,6 +8175,9 @@ function rpUpdateGrowthProgress(){
   }).length;
   const bar = document.getElementById('rp-growth-progress');
   if(bar) bar.style.width = Math.round(filled/GROWTH_FIELDS.length*100)+'%';
+  // 「N/6項目入力済み」テキストも同期して更新
+  const countText = document.getElementById('rp-growth-count-text');
+  if(countText) countText.textContent = `${filled}/${GROWTH_FIELDS.length}項目入力済み`;
   // バッジ更新
   const badge = document.querySelector('#rp-acc-growth-arrow')?.previousElementSibling?.querySelector('.rp-accordion-badge');
   if(badge){
