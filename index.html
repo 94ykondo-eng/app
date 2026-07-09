@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.65';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.66';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2585,7 +2585,9 @@ async function loadFromGAS(){
     // バックグラウンドで最新案件をGASから取得しdocs等を反映（他アカウントの変更を同期）
     setTimeout(async()=>{
       beginSync();
-      try{
+      _lastAutoSyncAt = Date.now();   // フォアグラウンド自動同期と同じ「前回同期タイミング」を共有
+      // カレンダー（案件）の同期
+      const _syncCases = (async()=>{ try{
         const casesData = await gasGet('getCases');
         if(casesData && Array.isArray(casesData) && casesData.length>0){
           const gasCases = parseCases(casesData);
@@ -2608,9 +2610,9 @@ async function loadFromGAS(){
           if(panelCaseId) renderDocSection(panelCaseId);
           console.log('[sync] バックグラウンドで案件を更新しました');
         }
-      }catch(e){ console.warn('バックグラウンド同期スキップ'); }
-      // 日報もバックグラウンドで同期（他端末から提出された日報を起動時に反映）
-      try{
+      }catch(e){ console.warn('バックグラウンド同期スキップ'); } })();
+      // 日報の同期（カレンダーと同時に並行実行）
+      const _syncReports = (async()=>{ try{
         const localRptsBg = [...DAILY_REPORTS];
         const reportsDataBg = await gasGet('getReports');
         if(reportsDataBg && Array.isArray(reportsDataBg)){
@@ -2643,7 +2645,9 @@ async function loadFromGAS(){
             console.log('[sync] バックグラウンドで日報を更新しました: '+DAILY_REPORTS.length+'件');
           }
         }
-      }catch(e){ console.warn('日報バックグラウンド同期スキップ'); }
+      }catch(e){ console.warn('日報バックグラウンド同期スキップ'); } })();
+      // カレンダー（案件）・日報・月間目標を同時に同期し、すべて完了してから同期中表示を解除
+      try{ await Promise.all([_syncCases, _syncReports, loadMonthGoal()]); }
       finally{ endSync(); }
     },600);
     return;
