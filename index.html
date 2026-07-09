@@ -316,7 +316,7 @@
   .btn-submit:hover{background:#1d4ed8}
 
   /* アップロード中オーバーレイ */
-  #upload-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1500;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+  #upload-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:8500;align-items:center;justify-content:center;flex-direction:column;gap:16px}
   #upload-overlay.active{display:flex}
   #upload-overlay-box{background:#fff;border-radius:14px;padding:28px 36px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18)}
   #upload-overlay-msg{font-size:15px;font-weight:600;color:#1f2937;margin-bottom:8px}
@@ -373,7 +373,7 @@
   .photo-thumb-info{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.5);color:#fff;font-size:9px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .photo-uploading{opacity:0.5;pointer-events:none}
   /* 写真拡大モーダル */
-  .photo-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:2000;align-items:center;justify-content:center;flex-direction:column}
+  .photo-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:8000;align-items:center;justify-content:center;flex-direction:column}
   .photo-modal.open{display:flex}
   .photo-modal img{max-width:95vw;max-height:85vh;object-fit:contain;border-radius:6px}
   .photo-modal-close{position:absolute;top:16px;right:16px;border:none;background:rgba(255,255,255,0.2);color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
@@ -401,7 +401,7 @@
   .rp-time-btn:hover{background:var(--surface)}
 
   /* PDF出力モーダル */
-  .pdf-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}
+  .pdf-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:8000;align-items:center;justify-content:center}
   .pdf-modal.open{display:flex}
   .pdf-card{background:var(--surface);border-radius:16px;width:min(520px,96vw);max-height:88vh;overflow-y:auto;padding:24px}
   .pdf-section{margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)}
@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.50';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.51';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3968,7 +3968,7 @@ function showConfirm(msg, okLabel='OK'){
     if(!overlay){
       overlay=document.createElement('div');
       overlay.id='confirm-overlay';
-      overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center';
+      overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center';
       document.body.appendChild(overlay);
     }
     overlay.innerHTML=`<div style="background:var(--surface);border-radius:14px;padding:24px;width:min(340px,90vw);box-shadow:0 8px 32px rgba(0,0,0,0.2)">
