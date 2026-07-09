@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.55';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.56';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -8042,6 +8042,9 @@ function renderReportView(){
   }
 
   el.innerHTML = html;
+  // 「今週の行動目標」の自動引き継ぎなど、HTML生成時点のexisting情報だけでは
+  // 拾えない初期値があるため、実際にDOMへ入った値を元に進捗表示を再計算する
+  rpUpdateGrowthProgress();
 }
 
 // アコーディオン開閉
