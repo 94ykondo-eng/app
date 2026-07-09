@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.51';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.52';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2609,6 +2609,41 @@ async function loadFromGAS(){
           console.log('[sync] バックグラウンドで案件を更新しました');
         }
       }catch(e){ console.warn('バックグラウンド同期スキップ'); }
+      // 日報もバックグラウンドで同期（他端末から提出された日報を起動時に反映）
+      try{
+        const localRptsBg = [...DAILY_REPORTS];
+        const reportsDataBg = await gasGet('getReports');
+        if(reportsDataBg && Array.isArray(reportsDataBg)){
+          const gasRptsBg = reportsDataBg.map(r=>{
+            let rpCases=[],rpGrowth={};
+            try{ rpCases  = typeof r.cases==='string'  ? JSON.parse(r.cases)  : []; }catch(e2){ rpCases=[];  }
+            try{ rpGrowth = typeof r.growth==='string' ? JSON.parse(r.growth) : {}; }catch(e2){ rpGrowth={}; }
+            return {
+              id:r.id||genId(), user:String(r.user||''), date:normalizeDate(r.date),
+              startTime:normalizeTime(r.startTime), endTime:normalizeTime(r.endTime),
+              cases:rpCases, note:r.note||'', growth:rpGrowth,
+              submittedAt:normalizeTime(r.submittedAt),
+              firstSubmittedAt:normalizeTime(r.firstSubmittedAt||r.submittedAt),
+              reEditedAt:normalizeTime(r.reEditedAt)
+            };
+          }).filter(r=>r.user&&r.date);
+          const gasRptIdsBg = new Set(gasRptsBg.map(r=>String(r.id)));
+          const localOnlyBg = localRptsBg.filter(r=>!gasRptIdsBg.has(String(r.id)));
+          if(localOnlyBg.length>0) localOnlyBg.forEach(r=>gasPost({action:'saveReport',report:r}));
+          if(gasRptsBg.length === 0 && localRptsBg.length > 0){
+            // GASが0件・ローカルあり → ローカル維持（誤消去防止）
+          } else {
+            DAILY_REPORTS = [...gasRptsBg, ...localOnlyBg];
+            saveCacheLS();
+            renderCal();   // ミニカレンダーの提出状況（丸）を更新
+            // 日報系のタブを表示中なら、その画面も更新
+            if(document.getElementById('daily-view')?.style.display!=='none'){ renderMiniCal(); renderDaily(); }
+            if(document.getElementById('report-view')?.style.display!=='none'){ renderReportMiniCal(); renderReportView(); }
+            if(document.getElementById('kintai-view')?.style.display!=='none' && typeof renderKintai==='function'){ renderKintai(); }
+            console.log('[sync] バックグラウンドで日報を更新しました: '+DAILY_REPORTS.length+'件');
+          }
+        }
+      }catch(e){ console.warn('日報バックグラウンド同期スキップ'); }
       finally{ endSync(); }
     },600);
     return;
