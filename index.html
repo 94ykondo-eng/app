@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.52';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.55';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -5009,7 +5009,8 @@ function renderCal(){
       cell.el.appendChild(bar);
 
       // その案件の帯の直下に、その日の協力会社ラベルを表示（高さは帯と同じ16px）
-      if(!onlyMulti){
+      // 前月・翌月にはみ出したセルでも、実際にその日に案件がある以上は協力会社情報も表示する
+      {
         const kyoLabel=caseVendorDayLabel(c, cell.ds);
         if(kyoLabel){
           let workerCount=0;
@@ -5410,12 +5411,15 @@ function caseVendorDayLabel(c, ds){
   if(!c||!c.vendors||!c.vendors.length) return '';
   const parts=[];
   c.vendors.forEach(v=>{
+    if(!v.id) return;                    // 協力会社が選ばれていない行は対象外
+    if(!(c.start<=ds && ds<=c.end)) return; // 案件の期間外は対象外
     let arr=v.days?v.days[ds]:null;
     if(typeof arr==='string') arr=arr.trim()?[{n:arr.trim()}]:[];
     if(!Array.isArray(arr)) arr=[];
     const names=arr.map(w=>String(w.n||'').trim()).filter(Boolean);
-    if(!names.length) return;
     const nm=vendorName(getMember(v.id),true);
+    // その日の作業員名が未入力でも、協力会社が選ばれていれば会社名だけは表示する
+    if(!names.length){ if(nm) parts.push(nm); return; }
     parts.push(nm?`${nm}(${names.join('・')})`:names.join('・'));
   });
   return parts.join('／');
@@ -7565,6 +7569,20 @@ function getMyReport(date, user){
   );
 }
 
+// 指定日より前で、自分が「今週の行動目標」を書いた直近の日報からその内容を返す（新規日報の初期値用）
+function _lastWeekGoal(beforeDate){
+  const uid = String(currentUser||'').trim().toLowerCase();
+  let best = null;
+  DAILY_REPORTS.forEach(r=>{
+    if(String(r.user||'').trim().toLowerCase() !== uid) return;
+    const d = normalizeDate(r.date);
+    if(!(d < beforeDate)) return;                                   // 対象日より前のみ
+    if(!(r.growth && String(r.growth.weekGoal||'').trim())) return; // 目標が書かれているもののみ
+    if(!best || d > normalizeDate(best.date)) best = r;             // 最も新しいもの
+  });
+  return best ? best.growth.weekGoal : '';
+}
+
 function rpClearGrowthError(){
   // 全項目が入力されたらエラーを非表示
   const allFilled = GROWTH_FIELDS.every(f=>{
@@ -7999,7 +8017,9 @@ function renderReportView(){
       <div id="rp-growth-error" style="display:none;background:#FEE2E2;color:#991B1B;border-radius:var(--radius);padding:8px 12px;font-size:12px;margin-bottom:10px;line-height:1.8"></div>`;
 
   GROWTH_FIELDS.forEach(f=>{
-    const val = existing?.growth?.[f.key]||'';
+    let val = existing?.growth?.[f.key]||'';
+    // 「今週の行動目標」だけは、未提出で空欄なら前回の日報から引き継ぐ（毎日同じ目標を打ち直す手間をなくす）
+    if(f.key==='weekGoal' && !val && !submitted){ val = _lastWeekGoal(ds); }
     const isEmpty = !submitted && !val;
     html += `<div class="rp-growth-item" style="border-left-color:${f.color}${isEmpty?';background:#FFF8F8':''}">
       <div class="rp-growth-lbl" style="display:flex;align-items:center;gap:4px;color:${f.color}">
