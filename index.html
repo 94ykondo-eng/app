@@ -1635,7 +1635,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.66';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.67';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2638,9 +2638,9 @@ async function loadFromGAS(){
             DAILY_REPORTS = [...gasRptsBg, ...localOnlyBg];
             saveCacheLS();
             renderCal();   // ミニカレンダーの提出状況（丸）を更新
-            // 日報系のタブを表示中なら、その画面も更新
-            if(document.getElementById('daily-view')?.style.display!=='none'){ renderMiniCal(); renderDaily(); }
-            if(document.getElementById('report-view')?.style.display!=='none'){ renderReportMiniCal(); renderReportView(); }
+            // 日報系のタブを表示中なら、その画面も更新（入力中は再描画せず未保存の入力を守る）
+            if(document.getElementById('daily-view')?.style.display!=='none'){ renderMiniCal(); if(!MG_FORM_DIRTY) renderDaily(); }
+            if(document.getElementById('report-view')?.style.display!=='none'){ renderReportMiniCal(); if(!RP_FORM_DIRTY) renderReportView(); }
             if(document.getElementById('kintai-view')?.style.display!=='none' && typeof renderKintai==='function'){ renderKintai(); }
             console.log('[sync] バックグラウンドで日報を更新しました: '+DAILY_REPORTS.length+'件');
           }
@@ -2948,10 +2948,10 @@ async function reloadFromGAS(quiet){
   // 現在表示中のタブも更新
   const activeView = document.querySelector('.view-btn.active')?.onclick?.toString();
   if(document.getElementById('daily-view')?.style.display!=='none'){
-    renderMiniCal(); renderDaily();
+    renderMiniCal(); if(!MG_FORM_DIRTY) renderDaily();
   }
   if(document.getElementById('report-view')?.style.display!=='none'){
-    renderReportMiniCal(); renderReportView();
+    renderReportMiniCal(); if(!RP_FORM_DIRTY) renderReportView();
   }
   const _sb2=document.getElementById('settings-btn');
   if(_sb2) _sb2.style.display=isAdmin()?'inline-block':'none';
@@ -7118,6 +7118,7 @@ function renderOthersReports(ds){
   return html;
 }
 function renderDaily(){
+  MG_FORM_DIRTY = false;   // 画面を描画し直した時点で未保存入力は無い
   const dailyEl=document.getElementById('daily-content')||document.getElementById('daily-view');
   if(!dailyEl) return;
   if(!window.adminDailyDate) window.adminDailyDate = getTodayStr();
@@ -7467,8 +7468,8 @@ async function loadStampsFromGAS(){
       if(Array.isArray(d.palette) && d.palette.length>0) STAMPS = d.palette;
       saveCacheLS();
       const dv=document.getElementById('daily-view'), rv=document.getElementById('report-view');
-      if(dv && dv.style.display!=='none' && typeof renderDaily==='function') renderDaily();
-      if(rv && rv.style.display!=='none' && typeof renderReportView==='function') renderReportView();
+      if(dv && dv.style.display!=='none' && typeof renderDaily==='function' && !MG_FORM_DIRTY) renderDaily();
+      if(rv && rv.style.display!=='none' && typeof renderReportView==='function' && !RP_FORM_DIRTY) renderReportView();
     }
   }catch(e){}
 }
@@ -7555,9 +7556,9 @@ async function loadMonthGoal(){
       MONTH_GOAL = res.goal;
       MONTH_GOAL_DETAIL = typeof res.detail === 'string' ? res.detail : '';
       try{ localStorage.setItem('gemba_month_goal', MONTH_GOAL); localStorage.setItem('gemba_month_goal_detail', MONTH_GOAL_DETAIL); }catch(e){}
-      // 表示中なら反映
-      if(document.getElementById('report-view')?.style.display!=='none' && typeof renderReportView==='function'){ renderReportView(); }
-      if(document.getElementById('daily-view')?.style.display!=='none' && typeof renderDaily==='function'){ renderDaily(); }
+      // 表示中なら反映（入力中は再描画せず未保存の入力を守る）
+      if(document.getElementById('report-view')?.style.display!=='none' && typeof renderReportView==='function' && !RP_FORM_DIRTY){ renderReportView(); }
+      if(document.getElementById('daily-view')?.style.display!=='none' && typeof renderDaily==='function' && !MG_FORM_DIRTY){ renderDaily(); }
     }
   }catch(e){ /* 取得失敗時はキャッシュのMONTH_GOALを維持 */ }
 }
@@ -7575,6 +7576,7 @@ function saveMonthGoal(){
     localStorage.setItem('gemba_month_goal_detail', MONTH_GOAL_DETAIL);
   }catch(e){}
   gasPost({ action:'setMonthGoal', goal: MONTH_GOAL, detail: MONTH_GOAL_DETAIL });
+  MG_FORM_DIRTY = false;   // 保存したので未保存入力は無い
   const st = document.getElementById('month-goal-status');
   if(st){ st.textContent = '✓ 保存しました'; setTimeout(()=>{ if(st) st.textContent=''; }, 2500); }
 }
@@ -7602,6 +7604,20 @@ function showMonthGoalDetail(){
   </div>`;
   ov.style.display = 'flex';
 }
+
+// ===== 入力中の未保存データを自動同期の再描画から守る =====
+// 日報フォームや月間目標欄に入力があると立ち、画面を作り直すと消えてしまう
+// 未保存の入力がある間は、自動同期による再描画をスキップする（データは裏で最新化される）
+let RP_FORM_DIRTY = false;   // 日報報告フォームに未保存の入力があるか
+let MG_FORM_DIRTY = false;   // 管理者の月間目標入力欄に未保存の入力があるか
+function _markFormDirty(e){
+  const t = e.target;
+  if(!t || !t.closest) return;
+  if(t.closest('#report-content')) RP_FORM_DIRTY = true;
+  if(t.id === 'admin-month-goal' || t.id === 'admin-month-goal-detail') MG_FORM_DIRTY = true;
+}
+document.addEventListener('input', _markFormDirty, true);
+document.addEventListener('change', _markFormDirty, true);
 
 // ===== 日報報告機能 =====
 let DAILY_REPORTS = [];
@@ -8140,6 +8156,7 @@ function renderReportView(){
   // 「今週の行動目標」の自動引き継ぎなど、HTML生成時点のexisting情報だけでは
   // 拾えない初期値があるため、実際にDOMへ入った値を元に進捗表示を再計算する
   rpUpdateGrowthProgress();
+  RP_FORM_DIRTY = false;   // フォームを描画し直した時点で未保存入力は無い
 }
 
 // アコーディオン開閉
