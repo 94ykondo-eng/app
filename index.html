@@ -1648,7 +1648,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.73';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.74';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1892,6 +1892,7 @@ function apAddCase(){
   if(!canAdd()){ alert('案件を追加する権限がありません'); return; }
   const name=document.getElementById('ap-name').value.trim();
   if(!name){document.getElementById('ap-name').focus();return;}
+  CASE_FORM_DIRTY = false;   // 保存するので未保存状態を解除（この後のopenDetailで警告しない）
 
   const nc={
     id:genId(),name,
@@ -1931,6 +1932,7 @@ function apAddCase(){
 
 function apReset(){
   ['ap-name','ap-client','ap-client-abbr','ap-contact','ap-address','ap-est','ap-memo'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.value=''; if(el.tagName==='TEXTAREA') autoResize(el); } });
+  CASE_FORM_DIRTY = false;   // 手動リセット後は未入力扱い
 }
 
 // ---- カレンダー日付ドラッグ選択 ----
@@ -4610,6 +4612,7 @@ function showSaveWarning(){
 }
 
 function closeAddPanel(){
+  if(!confirmDiscardCaseForm()) return;   // 入力中の案件があれば警告
   const panel = document.getElementById('add-panel');
   const btn   = document.getElementById('panel-close-btn');
   if(panel) panel.classList.remove('visible');
@@ -5890,6 +5893,7 @@ function showInputFields(){
 
 
 function showNewMode(showPanel=false){
+  if(!confirmDiscardCaseForm()) return;   // 別の入力中の案件があれば警告
   { const _sn=document.getElementById('pf-swipe-nav'); if(_sn) _sn.style.display='none'; }
   panelMode='new'; panelCaseId=null;
   pfExpenses=[];
@@ -5937,6 +5941,7 @@ function showNewMode(showPanel=false){
   highlightRange('','');
   _pfEstDaily={};
   renderEstDaily();
+  CASE_FORM_DIRTY = false;   // 開いた直後の空フォームは未入力扱い
 }
 
 // ===== 案件票の左右スワイプ移動（同じ日の案件を前後に） =====
@@ -6007,6 +6012,7 @@ function _setupSwipe(){
 }
 function openDetail(id, date){
   const c=cases.find(x=>x.id===id); if(!c) return;
+  if(!confirmDiscardCaseForm()) return;   // 入力中の別案件があれば警告
   // 日付が案件の期間内に収まるよう補正、範囲外や未指定はc.startを使用
   if(date && date >= c.start && date <= c.end){
     panelDate = date;
@@ -6114,9 +6120,11 @@ function enterEditMode(){
   document.getElementById('pf-view-extra').style.display='none';
   const _psEdit2=document.getElementById('pf-photos-section'); if(_psEdit2) _psEdit2.style.display='none';
   const _dsEdit2=document.getElementById('pf-docs-section'); if(_dsEdit2) _dsEdit2.style.display='none';
+  CASE_FORM_DIRTY = false;   // 編集開始直後は未変更
 }
 
 function cancelEditMode(){
+  CASE_FORM_DIRTY = false;   // 明示的なキャンセルは警告なしで破棄
   _editingCase = null;
   if(panelCaseId) openDetail(panelCaseId);
   else showNewMode();
@@ -6133,6 +6141,7 @@ function pfSaveCase(){
   if(!c){ console.error('[pfSaveCase] case not found: panelCaseId=', panelCaseId); return; }
   const name=document.getElementById('ap-name').value.trim();
   if(!name){alert('案件名を入力してください');return;}
+  CASE_FORM_DIRTY = false;   // 保存するので未保存状態を解除
 
   c.name     =name;
   c.client   =document.getElementById('ap-client').value||'未設定';
@@ -6255,6 +6264,7 @@ async function deleteCase(){
 
 
 function switchView(v,btn){
+  if(!confirmDiscardCaseForm()) return;   // 入力中の案件があれば警告
   document.querySelectorAll('.view-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
   document.getElementById('calendar-view').style.display=v==='calendar'?'flex':'none';
   document.getElementById('daily-view').style.display=v==='daily'?'flex':'none';
@@ -7962,14 +7972,25 @@ function showMonthGoalDetail(){
 // 未保存の入力がある間は、自動同期による再描画をスキップする（データは裏で最新化される）
 let RP_FORM_DIRTY = false;   // 日報報告フォームに未保存の入力があるか
 let MG_FORM_DIRTY = false;   // 管理者の月間目標入力欄に未保存の入力があるか
+let CASE_FORM_DIRTY = false; // 案件入力フォーム(add-panel)に未保存の入力があるか（新規・編集）
 function _markFormDirty(e){
   const t = e.target;
   if(!t || !t.closest) return;
   if(t.closest('#report-content')) RP_FORM_DIRTY = true;
   if(t.id === 'admin-month-goal' || t.id === 'admin-month-goal-detail') MG_FORM_DIRTY = true;
+  // 案件フォーム：新規/編集モードで何か入力・変更されたら未保存フラグを立てる（空フォームは立たない）
+  if(t.closest('#add-panel') && (panelMode==='new' || panelMode==='edit')) CASE_FORM_DIRTY = true;
 }
 document.addEventListener('input', _markFormDirty, true);
 document.addEventListener('change', _markFormDirty, true);
+
+// 入力中の案件が破棄される操作の前に警告する（OKなら破棄して続行）
+function confirmDiscardCaseForm(){
+  if(!CASE_FORM_DIRTY) return true;
+  const ok = confirm('入力中の案件があります。\n移動すると入力した内容は破棄されます。よろしいですか？');
+  if(ok) CASE_FORM_DIRTY = false;
+  return ok;
+}
 
 // ===== 日報報告機能 =====
 let DAILY_REPORTS = [];
