@@ -1648,7 +1648,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.71';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.72';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4967,9 +4967,13 @@ function renderCal(){
     if(!isOther){
       if(canAdd()){
         cell.classList.add('selectable');
-        cell.addEventListener('mousedown',e=>{if(e.target===cell||e.target===dn){e.preventDefault();startDateDrag(ds);}});
-        cell.addEventListener('mouseenter',()=>{if(dragActive)updateDateDrag(ds);});
-        cell.addEventListener('mouseup',()=>{if(dragActive)endDateDrag(ds);});
+        // 日付範囲ドラッグはPC(マウス)専用。モバイルで mousedown の preventDefault が
+        // タップの click を潰し「余白タップで新規案件が開かない」不具合になるため、非モバイルのみ付与
+        if(!IS_MOBILE()){
+          cell.addEventListener('mousedown',e=>{if(e.target===cell||e.target===dn){e.preventDefault();startDateDrag(ds);}});
+          cell.addEventListener('mouseenter',()=>{if(dragActive)updateDateDrag(ds);});
+          cell.addEventListener('mouseup',()=>{if(dragActive)endDateDrag(ds);});
+        }
       }
       cell.addEventListener('click',e=>{
         // ドラッグ直後100ms以内のクリックは無視
