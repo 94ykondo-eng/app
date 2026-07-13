@@ -1648,7 +1648,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.76';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.77';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2357,6 +2357,113 @@ function dragDialogAction(action){
     setTimeout(()=>openDetail(c.id),100);
   } else if(action==='copy'){
     // JSON経由でディープコピー（shared referenceを排除）
+    const copy=JSON.parse(JSON.stringify(c));
+    copy.id=genId();
+    copy.start=addDaysStr(c.start,delta);
+    copy.end=addDaysStr(c.end,delta);
+    copy.comments=[];
+    copy.photos=[...(c.photos||[])];
+    cases.push(copy);
+    saveCase_GAS(copy);
+    logActivity('追加', copy);
+    saveCacheLS();
+    renderCal();
+    setTimeout(()=>openDetail(copy.id),100);
+  }
+}
+
+// ===== モバイル: 案件バー長押し → コピー/移動ダイアログ（管理者のみ・PCドラッグとは独立） =====
+// タッチ専用。合成clickに頼らず touchstart/touchend で長押しを検出する（v.73の教訓）。
+function attachCaseLongPress(el, caseId){
+  let timer=null, sx=0, sy=0, fired=false;
+  const clearTimer=()=>{ if(timer){ clearTimeout(timer); timer=null; } };
+  // iOSの長押しコールアウト（コピー/選択メニュー）を抑止（このバー内だけ）
+  el.style.webkitTouchCallout='none';
+  el.style.userSelect='none';
+  el.addEventListener('touchstart', e=>{
+    if(!isAdmin()||isReloading) return;                 // 管理者のみ・再取得中は無効
+    if(!e.touches || e.touches.length!==1) return;       // マルチタッチは対象外
+    fired=false;
+    sx=e.touches[0].clientX; sy=e.touches[0].clientY;
+    clearTimer();
+    timer=setTimeout(()=>{
+      fired=true;
+      window._lastCaseLongPress=Date.now();              // 直後の合成clickを抑止
+      if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(_){} }
+      openCaseMoveDialog(caseId);
+    }, 500);
+  }, {passive:true});
+  el.addEventListener('touchmove', e=>{
+    if(!timer) return;
+    const t=e.touches&&e.touches[0]; if(!t) return;
+    if(Math.abs(t.clientX-sx)+Math.abs(t.clientY-sy)>12) clearTimer(); // スクロール→長押しキャンセル
+  }, {passive:true});
+  el.addEventListener('touchend', e=>{
+    clearTimer();
+    if(fired){ e.preventDefault(); window._lastCaseLongPress=Date.now(); } // 長押し確定時は詳細を開かせない
+  });
+  el.addEventListener('touchcancel', clearTimer, {passive:true});
+}
+// バーのタップ時、直前に長押しが確定していたら詳細を開かない
+function _caseTapSuppressed(){
+  return window._lastCaseLongPress && (Date.now()-window._lastCaseLongPress < 500);
+}
+function openCaseMoveDialog(caseId){
+  if(!isAdmin()){ alert('案件のコピー・移動は管理者のみです'); return; }
+  const c=cases.find(x=>String(x.id)===String(caseId));
+  if(!c) return;
+  const start=String(c.start||''); const end=String(c.end||start)||start;
+  const isMulti = end && end!==start;
+  const dur = isMulti ? (diffDaysStr(start,end)+1) : 1;
+  let ov=document.getElementById('case-move-overlay');
+  if(!ov){
+    ov=document.createElement('div');
+    ov.id='case-move-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
+    ov.onclick=(e)=>{ if(e.target===ov) closeCaseMoveDialog(); };
+    document.body.appendChild(ov);
+  }
+  const periodLabel = isMulti ? `${start} 〜 ${end}（${dur}日間）` : `${start}（単日）`;
+  ov.innerHTML = `<div style="background:var(--surface);border-radius:14px;padding:20px;width:min(400px,94vw);box-shadow:0 8px 32px rgba(0,0,0,0.25)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:4px">📄 案件をコピー / 移動</div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:2px">${escHtml(c.name||'')}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">現在: ${escHtml(periodLabel)}</div>
+    <input type="hidden" id="cmv-caseid" value="${escHtml(String(c.id))}">
+    <input type="hidden" id="cmv-start" value="${escHtml(start)}">
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px">移動先・コピー先の開始日${isMulti?`（${dur}日間ぶんを保持）`:''}</div>
+      <input type="date" id="cmv-dest" value="${escHtml(start)}" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:15px">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="drag-dialog-btn copy" style="flex:1;padding:12px;font-size:14px" onclick="caseMoveDialogAction('copy')">コピー</button>
+      <button type="button" class="drag-dialog-btn move" style="flex:1;padding:12px;font-size:14px" onclick="caseMoveDialogAction('move')">移動</button>
+    </div>
+    <button type="button" onclick="closeCaseMoveDialog()" style="width:100%;margin-top:8px;padding:8px;border:none;background:transparent;color:var(--text-muted);font-size:13px;cursor:pointer">キャンセル</button>
+  </div>`;
+  ov.style.display='flex';
+}
+function closeCaseMoveDialog(){ const ov=document.getElementById('case-move-overlay'); if(ov) ov.style.display='none'; }
+function caseMoveDialogAction(action){
+  if(roGuard()) return;
+  if(!isAdmin()){ alert('案件のコピー・移動は管理者のみです'); return; }
+  const cid=document.getElementById('cmv-caseid')?.value;
+  const origStart=document.getElementById('cmv-start')?.value;
+  const dest=document.getElementById('cmv-dest')?.value;
+  if(!dest){ alert('移動先・コピー先の日付を入力してください'); return; }
+  const c=cases.find(x=>String(x.id)===String(cid));
+  if(!c){ closeCaseMoveDialog(); return; }
+  const delta=diffDaysStr(origStart, dest);
+  if(action==='move' && delta===0){ alert('移動先が現在と同じ日付です'); return; }
+  closeCaseMoveDialog();
+  if(action==='move'){
+    c.start=addDaysStr(c.start,delta);
+    c.end=addDaysStr(c.end,delta);
+    saveCase_GAS(c);
+    logActivity('変更', c);
+    saveCacheLS();
+    renderCal();
+    setTimeout(()=>openDetail(c.id),100);
+  } else { // copy: PC版 dragDialogAction と同じ複製ロジック
     const copy=JSON.parse(JSON.stringify(c));
     copy.id=genId();
     copy.start=addDaysStr(c.start,delta);
@@ -5169,8 +5276,8 @@ function renderCal(){
           +`<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(c.clientAbbr||c.client&&c.client!=='未設定')?escHtml(c.clientAbbr||c.client)+' ':''}<span style="opacity:0.75">${c.name}</span></span>`;
       }
 
-      bar.onclick=e=>{e.stopPropagation();openDetail(c.id, cell.ds);};
-      if(canDrag()) attachEventDrag(bar, c.id);
+      bar.onclick=e=>{e.stopPropagation(); if(_caseTapSuppressed()) return; openDetail(c.id, cell.ds);};
+      if(canDrag()){ attachEventDrag(bar, c.id); attachCaseLongPress(bar, c.id); }
       cell.el.appendChild(bar);
 
       // その案件の帯の直下に、その日の協力会社ラベルを表示（高さは帯と同じ16px）
@@ -5380,8 +5487,8 @@ function renderBandOverlay(){
       } else {
         band.innerHTML='&nbsp;';
       }
-      band.onclick=e=>{e.stopPropagation();openDetail(c.id,firstCell.ds);};
-      if(canDrag()) attachEventDrag(band,c.id);
+      band.onclick=e=>{e.stopPropagation(); if(_caseTapSuppressed()) return; openDetail(c.id,firstCell.ds);};
+      if(canDrag()){ attachEventDrag(band,c.id); attachCaseLongPress(band,c.id); }
       grid.appendChild(band);
     });
   });
