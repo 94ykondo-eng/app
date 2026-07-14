@@ -636,6 +636,9 @@
   #drag-ghost{position:fixed;pointer-events:none;z-index:999;height:16px;min-width:120px;max-width:260px;border-radius:3px;padding:1px 8px;font-size:10px;font-weight:500;display:none;align-items:center;gap:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.85;box-shadow:0 4px 12px rgba(0,0,0,0.2);line-height:14px;transform:translate(-50%,-50%)}
   #drag-ghost.active{display:flex}
   .event-bar.dragging{opacity:0.35}
+  /* 案件バー下部の添付インジケータ：青=写真あり / 赤=資料(図面等)あり */
+  .attach-strip{position:absolute;left:0;right:0;bottom:0;height:2px;display:flex;gap:1px;pointer-events:none;z-index:1;overflow:hidden}
+  .attach-strip>span{display:block}
   .band-overlay-bar{min-height:0;pointer-events:auto;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   .band-overlay-bar.dragging{opacity:0.35}
   .cal-memo.dragging{opacity:0.35}
@@ -1648,7 +1651,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.79';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.80';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -5285,6 +5288,7 @@ function renderCal(){
 
       bar.onclick=e=>{e.stopPropagation(); if(_caseTapSuppressed()) return; openDetail(c.id, cell.ds);};
       if(canDrag()){ attachEventDrag(bar, c.id); attachCaseLongPress(bar, c.id); }
+      if(!isMulti) _attachIndicatorStrip(bar, c);   // 単日バーのみ（複数日はバンド側で付与）
       cell.el.appendChild(bar);
 
       // その案件の帯の直下に、その日の協力会社ラベルを表示（高さは帯と同じ16px）
@@ -5362,6 +5366,29 @@ function renderCal(){
   });
 }
 
+
+// ===== 案件バー下部の添付インジケータ（青=写真あり / 赤=資料あり）=====
+function _caseHasPhotos(c){
+  return typeof CASE_PHOTOS!=='undefined' && Array.isArray(CASE_PHOTOS)
+    && CASE_PHOTOS.some(p=>String(p.caseId)===String(c.id));
+}
+function _caseHasDocs(c){
+  return Array.isArray(c.docs) && c.docs.length>0;
+}
+// バー要素の下端に細い色帯を絶対配置で付与（フローに影響しない）。
+// band は position:absolute のため触らず、単日バー(static)のみ relative 化する。
+function _attachIndicatorStrip(el, c){
+  const hasP=_caseHasPhotos(c), hasD=_caseHasDocs(c);
+  if(!hasP && !hasD) return;
+  if(el.style.position!=='absolute') el.style.position='relative';
+  const strip=document.createElement('div');
+  strip.className='attach-strip';
+  let seg='';
+  if(hasP) seg+='<span style="flex:1;background:#2563EB" title="写真あり"></span>';
+  if(hasD) seg+='<span style="flex:1;background:#DC2626" title="資料あり"></span>';
+  strip.innerHTML=seg;
+  el.appendChild(strip);
+}
 
 function renderBandOverlay(){
   // CSS Grid span方式：複数日案件の名前バーをcal-daysグリッドに直接配置
@@ -5496,6 +5523,7 @@ function renderBandOverlay(){
       }
       band.onclick=e=>{e.stopPropagation(); if(_caseTapSuppressed()) return; openDetail(c.id,firstCell.ds);};
       if(canDrag()){ attachEventDrag(band,c.id); attachCaseLongPress(band,c.id); }
+      _attachIndicatorStrip(band, c);   // 複数日バンド帯（各週セグメントに付与）
       grid.appendChild(band);
     });
   });
