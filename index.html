@@ -1651,7 +1651,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.81';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.83';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2004,12 +2004,13 @@ function handleDayTap(ds, t, fromTouch){
   // バー・スペーサー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
   if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.event-bar-spacer')||t.closest('.cal-memo'))) return;
   const dayCases = (typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=ds&&ds<=c.end);
-  if(dayCases.length>=2){ showDayPopup(ds, dayCases); return; }
-  if(dayCases.length===1){
-    // モバイル(タッチ)は1件でもポップアップ、PC(クリック)は従来どおり詳細を直接開く
-    if(fromTouch) showDayPopup(ds, dayCases);
-    else openDetail(dayCases[0].id, ds);
-    return;
+  if(fromTouch){
+    // モバイル(タッチ)：1件以上はポップアップで案件を選ばせる（v.79仕様）
+    if(dayCases.length>=1){ showDayPopup(ds, dayCases); return; }
+  } else {
+    // PC(クリック)：1件は詳細を直接開く。2件以上は各バーを直接クリックできるためポップアップは出さず、
+    // 余白クリックは0件の日と同じく新規作成へ進める（ユーザー選択仕様）。
+    if(dayCases.length===1){ openDetail(dayCases[0].id, ds); return; }
   }
   if(!canAdd()) return;                 // 追加権限が無いロールは何もしない（仕様）
   showNewMode(true);                    // showPanel=true でモバイルでも確実に立ち上げる
@@ -3164,6 +3165,25 @@ async function reloadFromGAS(quiet){
       })).filter(m=>m.id);
     }
 
+    // ===== 写真：GAS優先（他端末で追加された写真も同期で反映）=====
+    // pending（未送信のローカル仮データ）はGAS未到達分のみ残す。loadFromGASと同ロジック。
+    const photosDataR = await gasGet('getPhotos');
+    if(photosDataR && Array.isArray(photosDataR)){
+      const pendingLocal = CASE_PHOTOS.filter(p=>p.isPending);
+      CASE_PHOTOS = photosDataR.filter(p=>p.id&&p.caseId).map(p=>{
+        const localMatch = pendingLocal.find(lp=>
+          (lp.uploadedAt===String(p.uploadedAt) || lp.fileName===p.fileName) &&
+          String(lp.caseId)===String(p.caseId)
+        );
+        return { ...p, caseId:String(p.caseId), photoDate:p.photoDate || localMatch?.photoDate || '' };
+      });
+      const gasCaseIdsP = new Set(photosDataR.map(p=>String(p.caseId)));
+      const unsyncedP = pendingLocal.filter(p=>!gasCaseIdsP.has(String(p.caseId)));
+      if(unsyncedP.length>0) CASE_PHOTOS.push(...unsyncedP);
+      // パネルが開いていれば写真欄も再描画（reloadFromGAS末尾で renderCal も走る）
+      if(panelCaseId) renderPhotoSection(panelCaseId);
+    }
+
     // ===== 日報：マージ方式 =====
     const reportsData = await gasGet('getReports');
     if(reportsData && Array.isArray(reportsData)){
@@ -3673,6 +3693,7 @@ async function handlePhotoUpload(input){
       });
       saveCacheLS();
       renderPhotoSection(caseId);
+      if(typeof renderCal==='function') renderCal();   // カレンダーの添付インジケータを即反映
 
       // ③ GASに順番に送信（並列送信によるフォルダ重複を防ぐ）
       beginSave();
@@ -3707,6 +3728,7 @@ async function handlePhotoUpload(input){
             CASE_PHOTOS=[...gasPhotos,...pending,...nonPendingLocal];
             saveCacheLS();
             if(String(panelCaseId)===String(caseId)) renderPhotoSection(caseId);
+            if(typeof renderCal==='function') renderCal();   // カレンダーの添付インジケータを反映
           }
         }, 5000);
 
@@ -3760,6 +3782,7 @@ async function deletePhoto(photoId, fileId, caseId){
   CASE_PHOTOS = CASE_PHOTOS.filter(p=>p.id!==photoId);
   saveCacheLS();
   renderPhotoSection(caseId);
+  if(typeof renderCal==='function') renderCal();   // カレンダーの添付インジケータを即反映
   // GASに削除を通知（非同期）
   beginSave();
   gasPost({action:'deletePhoto', photoId, fileId}).then(()=>endSave()).catch(()=>endSave());
@@ -3834,6 +3857,7 @@ async function addDoc(){
   if(Array.isArray(c.deletedDocs)) c.deletedDocs=c.deletedDocs.filter(x=>x!==id);
   saveCacheLS();
   renderDocSection(caseId);
+  if(typeof renderCal==='function') renderCal();   // カレンダーの添付インジケータを即反映
   if(urlEl) urlEl.value='';
   if(nameEl) nameEl.value='';
   beginSave();
@@ -3854,6 +3878,7 @@ async function deleteDoc(docId, caseId){
   }
   saveCacheLS();
   renderDocSection(caseId);
+  if(typeof renderCal==='function') renderCal();   // カレンダーの添付インジケータを即反映
   beginSave();
   // 旧docsシートからも削除（キャッシュリセット時の復活を防止）
   gasPost({action:'deleteDoc', id:docId}).catch(()=>{});
@@ -6360,7 +6385,7 @@ function pfSendComment(cid){
   list.appendChild(div); list.scrollTop=9999;
 }
 
-function closeDetail(){ showNewMode(); }
+function closeDetail(){ showNewMode(); if(typeof renderCal==='function') renderCal(); }
 
 let editingCaseId = null;
 
