@@ -1651,7 +1651,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.80';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.81';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -5383,10 +5383,10 @@ function _attachIndicatorStrip(el, c){
   if(el.style.position!=='absolute') el.style.position='relative';
   const strip=document.createElement('div');
   strip.className='attach-strip';
-  let seg='';
-  if(hasP) seg+='<span style="flex:1;background:#2563EB" title="写真あり"></span>';
-  if(hasD) seg+='<span style="flex:1;background:#DC2626" title="資料あり"></span>';
-  strip.innerHTML=seg;
+  // 左=写真スロット / 右=資料スロット（位置固定）。無い側は透明にして常に左右2分割にする。
+  strip.innerHTML=
+    `<span style="flex:1;background:${hasP?'#2563EB':'transparent'}" title="${hasP?'写真あり':''}"></span>`+
+    `<span style="flex:1;background:${hasD?'#DC2626':'transparent'}" title="${hasD?'資料あり':''}"></span>`;
   el.appendChild(strip);
 }
 
