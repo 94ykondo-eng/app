@@ -1648,7 +1648,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.78';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.79';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1997,12 +1997,17 @@ function IS_MOBILE(){return window.matchMedia('(max-width:768px)').matches;}
 
 // カレンダー日セルのタップ共通処理（PC click / モバイル touchend の両方から呼ぶ）
 // IS_MOBILE 分岐に依存せず、案件の有無で分岐。空き日は新規案件フォームを開く。
-function handleDayTap(ds, t){
+function handleDayTap(ds, t, fromTouch){
   // バー・スペーサー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
   if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.event-bar-spacer')||t.closest('.cal-memo'))) return;
   const dayCases = (typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=ds&&ds<=c.end);
   if(dayCases.length>=2){ showDayPopup(ds, dayCases); return; }
-  if(dayCases.length===1){ openDetail(dayCases[0].id, ds); return; }
+  if(dayCases.length===1){
+    // モバイル(タッチ)は1件でもポップアップ、PC(クリック)は従来どおり詳細を直接開く
+    if(fromTouch) showDayPopup(ds, dayCases);
+    else openDetail(dayCases[0].id, ds);
+    return;
+  }
   if(!canAdd()) return;                 // 追加権限が無いロールは何もしない（仕様）
   showNewMode(true);                    // showPanel=true でモバイルでも確実に立ち上げる
   const s=document.getElementById('ap-start');
@@ -5127,7 +5132,7 @@ function renderCal(){
         if(moved>12 || Date.now()-_tsT>700) return; // スクロール/長押しはタップ扱いしない
         if(lastDragTime && Date.now()-lastDragTime < 100) return;
         window._lastDayTap=Date.now();             // 直後の合成clickを抑止
-        handleDayTap(ds, ev.target);
+        handleDayTap(ds, ev.target, true);          // タッチ由来のタップ（モバイル）
       },{passive:true});
     } else {
       // 前月末・翌月頭のセル：クリックでその月へ移動
