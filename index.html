@@ -1648,7 +1648,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.77';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.78';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2024,6 +2024,8 @@ window.addEventListener('resize', ()=>{
 });
 window.addEventListener('orientationchange', ()=>{ setTimeout(_reflowCalendar, 250); });
 
+// renderCal内で毎回更新される「表示中の月の可視案件」。handleDayTap等の外部からも参照するためモジュールレベルで保持。
+let visibleCases=[];
 // ===== 予定のドラッグ移動・コピー =====
 let evDrag=null; // {caseId, originDs, startX, startY, moved}
 let memoDrag=null; // メモ帯のドラッグ用（案件のevDragとは独立）: {memoId, originDs, startX, startY, moved}
@@ -5143,7 +5145,7 @@ function renderCal(){
   }
 
   // 表示対象の案件を絞り込み
-  const visibleCases=cases.filter(c=>
+  visibleCases=cases.filter(c=>
     getAssignees(c).some(id=>visibleMembers.has(id))&&statuses.has(c.status)&&canViewCase(c)
   );
 
