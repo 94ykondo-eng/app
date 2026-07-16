@@ -1652,7 +1652,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.87';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.88';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2030,13 +2030,11 @@ function handleDayTap(ds, t, fromTouch){
   if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.cal-memo'))) return;
   const dayCases = (typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=ds&&ds<=c.end);
   if(fromTouch){
-    // モバイル(タッチ)：1件以上はポップアップで案件を選ばせる（v.79仕様）
+    // モバイル(タッチ)：案件が1件以上ある日はポップアップで選ばせる（v.79仕様）
     if(dayCases.length>=1){ showDayPopup(ds, dayCases); return; }
-  } else {
-    // PC(クリック)：1件は詳細を直接開く。2件以上は各バーを直接クリックできるためポップアップは出さず、
-    // 余白クリックは0件の日と同じく新規作成へ進める（ユーザー選択仕様）。
-    if(dayCases.length===1){ openDetail(dayCases[0].id, ds); return; }
   }
+  // PC(クリック)：案件バーを直接クリックすれば詳細が開けるため、
+  // 余白クリックは案件の件数によらず常に新規追加へ進める（0件・1件・2件以上で挙動を統一）。
   if(!canAdd()) return;                 // 追加権限が無いロールは何もしない（仕様）
   showNewMode(true);                    // showPanel=true でモバイルでも確実に立ち上げる
   const s=document.getElementById('ap-start');
