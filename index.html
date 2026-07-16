@@ -1652,7 +1652,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.86';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.87';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -5190,14 +5190,19 @@ function renderCal(){
         handleDayTap(ds, ev.target, true);          // タッチ由来のタップ（モバイル）
       },{passive:true});
     } else {
-      // 前月末・翌月頭のセル：クリックでその月へ移動
+      // 前月末・翌月頭のセル：クリックでその月へ移動し、続けてその日付を選択（新規追加／詳細）
+      // （実在する日付のセルなので、当月セルと同じように案件を追加できるようにする）
       cell.classList.add('other-clickable');
       cell.addEventListener('click',e=>{
         const t=e.target;
-        if(t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.event-bar-spacer')) return;
+        // バー・メモ帯は各自のハンドラに任せる（.event-bar-spacer は pointer-events:none で透過）
+        if(t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.cal-memo')) return;
         currentYear=date.getFullYear();
         currentMonth=date.getMonth();
         renderCal();
+        // 移動後の月で、その日付の通常のタップ処理を行う。
+        // renderCal で DOM を作り直すため、対象要素(t)は渡さず null にする（上でバー類は除外済み）
+        handleDayTap(ds, null, IS_MOBILE());
       });
     }
     cells.push({el:cell,ds,dayNum,isOther,col:i%7,week:Math.floor(i/7)});
