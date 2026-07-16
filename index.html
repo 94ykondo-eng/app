@@ -1652,7 +1652,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.85';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.86';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2025,8 +2025,9 @@ function IS_MOBILE(){return window.matchMedia('(max-width:768px)').matches;}
 // カレンダー日セルのタップ共通処理（PC click / モバイル touchend の両方から呼ぶ）
 // IS_MOBILE 分岐に依存せず、案件の有無で分岐。空き日は新規案件フォームを開く。
 function handleDayTap(ds, t, fromTouch){
-  // バー・スペーサー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
-  if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.event-bar-spacer')||t.closest('.cal-memo'))) return;
+  // バー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
+  // （.event-bar-spacer は段揃え用の見えない詰め物で独自ハンドラを持たないため、余白と同じく新規追加へ進める）
+  if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.cal-memo'))) return;
   const dayCases = (typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=ds&&ds<=c.end);
   if(fromTouch){
     // モバイル(タッチ)：1件以上はポップアップで案件を選ばせる（v.79仕様）
@@ -5268,10 +5269,11 @@ function renderCal(){
       const c=dayCases.find(c=>(caseRow[c.id]||0)===row);
       if(!c){
         // スペーサー（空行）
+        // 段を揃えるための「見えない詰め物」なので、クリックはセルへ透過させる（余白と同じ挙動にする）
         const spacer=document.createElement('div');
         spacer.className='event-bar-spacer';
         const _spH=IS_MOBILE()?12:16;
-        spacer.style.cssText=`min-height:${_spH}px;max-height:${_spH}px;margin-bottom:2px;flex-shrink:0;`;
+        spacer.style.cssText=`min-height:${_spH}px;max-height:${_spH}px;margin-bottom:2px;flex-shrink:0;pointer-events:none;`;
         cell.el.appendChild(spacer);
         continue;
       }
