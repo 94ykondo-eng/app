@@ -1651,7 +1651,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.83';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.84';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1963,6 +1963,18 @@ function endDateDrag(ds){
   if(!dragActive) return;
   dragActive=false;
   const [s,e] = dragStartDate<=ds ? [dragStartDate,ds] : [ds,dragStartDate];
+  // 複数日にまたがるドラッグ選択では click が共通祖先(#cal-days)で発火し、セルの click
+  // ハンドラ（＝handleDayTap → showNewMode）を通らないため、ここで新規追加モードを明示的に立ち上げる。
+  if(canAdd()){
+    if(panelMode!=='new'){
+      showNewMode(true);
+      if(panelMode!=='new') return;   // 破棄確認でキャンセルされた場合は選択を反映しない
+    } else {
+      // すでに新規入力中：入力内容を消さないよう再初期化はせず、パネルの表示だけ確実にする
+      const _ap=document.getElementById('add-panel');
+      if(_ap && !_ap.classList.contains('visible')){ _ap.classList.add('visible'); showPanelCloseBtn(); }
+    }
+  }
   applyDateToPanel(s, e);
   highlightRange(s, e);
   // 案件名入力欄にフォーカス
