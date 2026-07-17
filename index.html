@@ -1734,7 +1734,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.89';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.92';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2977,6 +2977,9 @@ function parseCases(data){
     est:      Number(c.est)||0,
     estDaily: (c.estDaily&&typeof c.estDaily==='object')?c.estDaily:(()=>{try{const p=JSON.parse(c.estDaily||'{}');return (p&&typeof p==='object'&&!Array.isArray(p))?p:{};}catch(e){return {};}})(),
     memo:     c.memo     || '',
+    // v.92: 請求書の備考。案件詳細のメモ(memo)とは別の実体。
+    // ★parseCases はホワイトリスト方式なので、ここに書かないとGASから来た値が落ちる。
+    notes:    (c.notes==null) ? '' : String(c.notes),
     warn:     c.warn==='true'||c.warn===true,
     vendors:  Array.isArray(c.vendors) ? c.vendors : (()=>{ try{ return c.vendors?JSON.parse(c.vendors):[]; }catch(e){ return []; } })(),
     expenses: Array.isArray(c.expenses) ? c.expenses : (()=>{ try{ return c.expenses?JSON.parse(c.expenses):[]; }catch(e){ return []; } })(),
@@ -3427,6 +3430,7 @@ async function saveCase_GAS(c){
     assignees: JSON.stringify(c.assignees||[c.assignee||''].filter(Boolean)),
     barColor: c.barColor||'',
     status: c.status, est: c.est, estDaily: JSON.stringify(c.estDaily||{}), memo: c.memo, warn: c.warn,
+    notes: String(c.notes==null?'':c.notes),   // v.92: 請求書の備考（GAS側でJSON化して保存）
     vendors: c.vendors || [], expenses: c.expenses || [],
     docs: JSON.stringify(c.docs||[]),
     deletedDocs: JSON.stringify(c.deletedDocs||[])
@@ -6963,6 +6967,169 @@ function _vendorsWithoutDayData(c){
   });
   return out;
 }
+// ===== v.90: 請求書・注文書からの直接編集（案件側へ書き戻し） =====
+// 設計の要点:
+//  ・表の1行は案件と1:1ではない（帯案件は日ごとに1行）。行→案件フィールドの対応は条件分岐する。
+//  ・帯案件の est は estDaily の合計として自動計算される（案件フォーム 2016行と同じルール）。
+//    そのため帯案件では est に直書きせず estDaily[日付] を更新し、est は再計算する。
+//  ・消費税・税込は導出値なので編集不可（自動再計算）。
+//  ・合計欄は編集させない（内訳へ配分できないため）。内訳サブ行で1項目ずつ編集する。
+
+// 帯案件かどうか（billingRows/orderRows と同じ判定）
+function _bizIsBand(c){ return !!(c && c.start && c.end && c.end > c.start); }
+
+// ★データ消失ガード:
+// 帯案件で日別見積が未設定のとき、従来の est は「初日の行にのみ」表示されている。
+// この状態で別の日を編集すると est=合計 の再計算で元の見積が消える。
+// そこで日別へ移行する前に、元の est を初日へ退避しておく。
+function _bizSeedEstDaily(c){
+  if(!_bizIsBand(c)) return;
+  const daily = c.estDaily || {};
+  const hasDaily = Object.keys(daily).some(d => (parseInt(daily[d]) || 0) > 0);
+  if(hasDaily) return;                      // 既に日別があるなら何もしない
+  const est = parseEst(c.est);
+  c.estDaily = est > 0 ? { [c.start]: est } : {};
+}
+
+// 見積の正規化（案件フォーム 2016行と同じ: 帯は estDaily の合計を est に、単日は estDaily を空に）
+function _bizNormalizeEst(c){
+  if(_bizIsBand(c)){
+    const days = new Set(caseDayList(c.start, c.end));
+    const out = {};
+    Object.keys(c.estDaily || {}).forEach(d => {
+      const v = parseInt(c.estDaily[d]) || 0;
+      if(days.has(d) && v > 0) out[d] = v;   // 期間外・0円は落とす
+    });
+    c.estDaily = out;
+    c.est = Object.values(out).reduce((a, b) => a + b, 0);
+  } else {
+    c.estDaily = {};
+  }
+}
+
+// 編集を案件へ適用し、保存・再描画までを1か所に集約する。
+// v.82の教訓「データ変更と再描画はセット」に従い renderCal も呼ぶ。
+function _bizApplyCaseEdit(caseId, mutate){
+  if(!isAdmin()) return false;                       // 請求/注文タブは管理者限定
+  const c = cases.find(x => String(x.id) === String(caseId));
+  if(!c) return false;
+  // ★v.91 修正: 退避は「見積編集のときだけ」では足りない。
+  // 下の _bizNormalizeEst は帯案件の est を estDaily の合計で必ず再計算するため、
+  // 日別未設定の帯案件では 諸経費/作業員/業者経費/備考 など“見積以外”を編集しただけで
+  // est が 0 になって保存されていた（v.90の実装漏れ）。全経路の入口で一律に退避する。
+  _bizSeedEstDaily(c);
+  mutate(c);
+  _bizNormalizeEst(c);
+  saveCacheLS();
+  saveCase_GAS(c);                                   // pendingSaveIds に載り60秒はローカル優先
+  renderCal();                                       // カレンダー側（帯・インジケータ）へ反映
+  return true;
+}
+
+// --- 請求書: 見積 ---
+// rowId は帯案件なら 'caseId@日付'、単日なら 'caseId'
+function billingEditEst(rowId, val){
+  const v = Math.max(0, parseEst(val));
+  const s = String(rowId), at = s.indexOf('@');
+  const cid = at >= 0 ? s.slice(0, at) : s;
+  const day = at >= 0 ? s.slice(at + 1) : '';
+  _bizApplyCaseEdit(cid, c => {
+    if(_bizIsBand(c) && day){
+      // 元の est の初日への退避は _bizApplyCaseEdit が実施済み（v.91で全経路へ集約）
+      c.estDaily = c.estDaily || {};
+      c.estDaily[day] = v;
+    } else {
+      c.est = v;                           // 単日案件は est をそのまま
+    }
+  });
+  renderBilling();
+}
+
+// --- 請求書: 諸経費の1項目（c.expenses[ei].a） ---
+function billingEditExpense(caseId, ei, val){
+  const v = Math.max(0, parseEst(val));
+  _bizApplyCaseEdit(caseId, c => {
+    if(Array.isArray(c.expenses) && c.expenses[ei]) c.expenses[ei].a = v;
+  });
+  renderBilling();
+}
+
+// --- 注文書: 作業員1人の金額（c.vendors[vi].days[日付][wi].a） ---
+function orderEditWorker(caseId, vi, day, wi, val){
+  const v = Math.max(0, parseEst(val));
+  _bizApplyCaseEdit(caseId, c => {
+    const vd = (c.vendors || [])[vi];
+    if(!vd) return;
+    vd.days = vd.days || {};
+    let arr = vd.days[day];
+    if(typeof arr === 'string') arr = arr.trim() ? [{ n: arr.trim(), a: 0 }] : [];   // 旧データ互換
+    if(!Array.isArray(arr)) arr = [];
+    if(arr[wi]) arr[wi].a = v;
+    vd.days[day] = arr;
+  });
+  renderOrder();
+}
+
+// --- 注文書: 業者経費の1項目（c.vendors[vi].dayExpenses[日付][ei].a） ---
+function orderEditExpense(caseId, vi, day, ei, val){
+  const v = Math.max(0, parseEst(val));
+  _bizApplyCaseEdit(caseId, c => {
+    const vd = (c.vendors || [])[vi];
+    if(!vd) return;
+    vd.dayExpenses = vd.dayExpenses || {};
+    const arr = vd.dayExpenses[day];
+    if(Array.isArray(arr) && arr[ei]) arr[ei].a = v;
+  });
+  renderOrder();
+}
+
+// --- 請求書: 備考（v.92: c.notes・案件詳細のメモとは別の実体） ---
+// ★保存先は casesシートの notes 列（v.92でGASに追加＝要再デプロイ）。
+//   c.memo（案件フォームの「備考・メモ」／案件詳細／日報PDF／案件検索）とは完全に独立していて、
+//   どちらを編集してももう一方は変わらない。
+//   粒度は案件ごと（帯案件は期間中の全行に同じ文言が出て、どの行で編集しても1つ）。
+function billingEditNote(caseId, val){
+  _bizApplyCaseEdit(caseId, c => { c.notes = String(val==null?'':val); });
+  renderBilling();
+}
+
+// --- 注文書: 備考（c.vendors[vi].dayNotes[日付]・v.91） ---
+// vendors はGAS側でJSON文字列として丸ごと保存される列（gas-code.js 387行）なので
+// 新しいキーを足しても saveCase の need 配列に触れずに済む＝再デプロイ不要。
+// 請求書と違い「案件×業者×日」ごとに独立した備考を持てる。
+function orderEditNote(caseId, vi, day, val){
+  const v = String(val==null?'':val);
+  _bizApplyCaseEdit(caseId, c => {
+    const vd = (c.vendors || [])[vi];
+    if(!vd) return;
+    vd.dayNotes = vd.dayNotes || {};
+    if(v.trim()) vd.dayNotes[day] = v;
+    else delete vd.dayNotes[day];                    // 空にしたらキーごと消す（JSONを太らせない）
+  });
+  renderOrder();
+}
+
+// 編集セル用の共通スタイル（右寄せ・枠は控えめ）
+function _bizNumInput(value, onchange, w){
+  if(!isAdmin()) return (parseInt(value)||0).toLocaleString('ja-JP');
+  return `<input type="number" min="0" step="1" value="${parseInt(value)||0}" onchange="${onchange}"
+    onclick="event.stopPropagation()"
+    style="width:${w||70}px;text-align:right;font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">`;
+}
+
+// 備考セル用（v.91）
+// ★<input type="text"> は値の改行を捨てる仕様のため使わない。
+//   c.memo は案件フォームでは textarea（多行）。input で表示すると、請求書側で
+//   触っただけで既存メモの改行が失われる。textarea なら多行のまま往復できる。
+//   なお <textarea> 開始タグ直後の改行はHTMLパーサが捨てるので、
+//   値の先頭が改行でも壊れないよう、意図的に1つ改行を挟んでから値を置く。
+function _bizTextInput(value, onchange, w){
+  const v = String(value==null?'':value);
+  if(!isAdmin()) return v ? `<span style="white-space:pre-wrap">${escHtml(v)}</span>` : '';
+  return `<textarea rows="1" onchange="${onchange}" onclick="event.stopPropagation()"
+    style="width:${w||120}px;height:26px;font-size:11px;font-family:inherit;line-height:1.5;padding:3px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);resize:vertical;vertical-align:middle">\n${escHtml(v)}</textarea>`;
+}
+
 function billingRows(){
   const range=getPeriodRange(billingPeriod.mode==='custom'?{mode:'custom',start:document.getElementById('bf-start')?.value||'',end:document.getElementById('bf-end')?.value||''}:billingPeriod);
   const rows=[];
@@ -6970,7 +7137,8 @@ function billingRows(){
     // 「休み」案件（勤怠と同じルール: 案件名に「休み」を含む）は請求対象外
     if(String(c.name||'').includes('休み')) return;
     const client=(c.client&&String(c.client).trim())||'（未設定）';
-    const expenses=(c.expenses||[]).filter(e=>String(e.n||'').trim());
+    // v.90: 編集の書き戻し先を特定するため、c.expenses 内の元インデックス(_ei)を保持したまま絞り込む
+    const expenses=(c.expenses||[]).map((e,_ei)=>Object.assign({},e,{_ei})).filter(e=>String(e.n||'').trim());
     const expTotal=caseExpenseTotal(c);
     const daily=c.estDaily||{};
     const isBand=c.start&&c.end&&c.end>c.start;
@@ -6992,7 +7160,7 @@ function billingRows(){
         const sub=est+exp;
         const tax=Math.floor(sub*0.1);
         const vd=_vendorInfoForDates(c,[d]);
-        rows.push({id:String(c.id)+'@'+d, client, date:d, name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses:rowExpList, vend:(first?vd.concat(vendNoData):vd)});
+        rows.push({id:String(c.id)+'@'+d, cid:c.id, client, date:d, name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses:rowExpList, note:String(c.notes||''), vend:(first?vd.concat(vendNoData):vd)});
         first=false;
       });
     } else if(inPeriod(c.start||'',range)){
@@ -7000,7 +7168,7 @@ function billingRows(){
       const exp=expTotal;
       const sub=est+exp;
       const tax=Math.floor(sub*0.1);
-      rows.push({id:c.id, client, date:c.start||'', name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses, vend:_vendorInfoForDates(c,caseDayList(c.start,c.end)).concat(_vendorsWithoutDayData(c))});
+      rows.push({id:c.id, cid:c.id, client, date:c.start||'', name:c.name||'', est, exp, sub, tax, total:sub+tax, expenses, note:String(c.notes||''), vend:_vendorInfoForDates(c,caseDayList(c.start,c.end)).concat(_vendorsWithoutDayData(c))});
     }
   });
   return rows;
@@ -7034,6 +7202,8 @@ function renderBilling(){
     +'<th style="width:72px;padding:7px 6px;text-align:right;border-bottom:1px solid var(--border)">諸経費</th>'
     +'<th style="width:74px;padding:7px 6px;text-align:right;border-bottom:1px solid var(--border)">消費税</th>'
     +'<th style="width:92px;padding:7px 6px;text-align:right;border-bottom:1px solid var(--border)">税込</th>'
+    // v.91: 備考（実体は案件の memo＝帯案件は全日で共通）
+    +'<th style="width:132px;padding:7px 6px;text-align:left;border-bottom:1px solid var(--border)" title="請求書用の備考です（案件詳細のメモとは別）。帯案件では期間中の全日で共通になります">備考</th>'
     +'</tr></thead><tbody>';
   groups.forEach((g,gi)=>{
     const sel=g.items.filter(r=>!billingExcluded.has(r.id));
@@ -7047,6 +7217,7 @@ function renderBilling(){
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.exp)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.tax)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.total)}</td>
+      <td style="border-bottom:1px solid var(--border)"></td>
     </tr>`;
     if(!collapsed) g.items.forEach(r=>{
       const chk=!billingExcluded.has(r.id);
@@ -7054,17 +7225,19 @@ function renderBilling(){
         <td style="padding:7px 6px;text-align:center;border-bottom:1px solid #F0EEE8"><input type="checkbox" ${chk?'checked':''} onchange="billingToggle('${r.id}',this.checked)"></td>
         <td style="padding:7px 6px;border-bottom:1px solid #F0EEE8;color:var(--text-muted)">${escHtml(r.date)}</td>
         <td style="padding:7px 6px;border-bottom:1px solid #F0EEE8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.name)}</td>
-        <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8">${yen(r.est)}</td>
+        <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8">${_bizNumInput(r.est,`billingEditEst('${r.id}',this.value)`,74)}</td>
         <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8;color:var(--text-muted)">${yen(r.exp)}</td>
         <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8;color:var(--text-muted)">${yen(r.tax)}</td>
         <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8">${yen(r.total)}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #F0EEE8">${_bizTextInput(r.note,`billingEditNote('${r.cid}',this.value)`,120)}</td>
       </tr>`;
       // 諸経費内訳サブ行（項目がある場合のみ）
+      // v.90: 合計は配分できないため、内訳の1項目ずつを編集可能にする（_ei = c.expenses内の元index）
       if(r.expenses&&r.expenses.length){
         html+=`<tr>
           <td></td>
-          <td colspan="6" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:var(--text-muted)">
-            諸経費内訳：${r.expenses.map(e=>`${escHtml(e.n||'')} ¥${(parseInt(e.a)||0).toLocaleString()}`).join('　／　')}
+          <td colspan="7" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:var(--text-muted)">
+            諸経費内訳：${r.expenses.map(e=>`${escHtml(e.n||'')} ¥${_bizNumInput(e.a,`billingEditExpense('${r.cid}',${e._ei},this.value)`,64)}`).join('　／　')}
           </td>
         </tr>`;
       }
@@ -7072,7 +7245,7 @@ function renderBilling(){
       if(r.vend&&r.vend.length){
         html+=`<tr>
           <td></td>
-          <td colspan="6" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:#B45309">
+          <td colspan="7" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:#B45309">
             協力会社：${r.vend.map(v=>`${escHtml(v.name)}${v.workers.length?`（${v.workers.map(w=>escHtml(w)).join('・')}）`:''}${v.wTotal?` ¥${v.wTotal.toLocaleString()}`:''}${v.expItems&&v.expItems.length?`＋経費 ${v.expItems.map(e=>`${escHtml(e.n)} ¥${e.a.toLocaleString()}`).join('・')}`:''}`).join('　／　')}
           </td>
         </tr>`;
@@ -7111,7 +7284,7 @@ function billingToggleAll(checked){
 }
 function billingExportCSV(){
   const csvCell=v=>{ const s=String(v==null?'':v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
-  const lines=[['顧客名','日付','案件名','見積金額(税抜)','諸経費','諸経費内訳','税抜小計','消費税(10%)','税込金額'].map(csvCell).join(',')];
+  const lines=[['顧客名','日付','案件名','見積金額(税抜)','諸経費','諸経費内訳','税抜小計','消費税(10%)','税込金額','備考'].map(csvCell).join(',')];
   let count=0;
   billingGroups().forEach(g=>{
     g.items.forEach(r=>{
@@ -7119,7 +7292,7 @@ function billingExportCSV(){
       const expDetail=(r.expenses&&r.expenses.length)
         ? r.expenses.map(e=>`${e.n||''}¥${(parseInt(e.a)||0).toLocaleString()}`).join(' / ')
         : '';
-      lines.push([g.client, r.date, r.name, r.est, r.exp, expDetail, r.sub, r.tax, r.total].map(csvCell).join(','));
+      lines.push([g.client, r.date, r.name, r.est, r.exp, expDetail, r.sub, r.tax, r.total, r.note||''].map(csvCell).join(','));
       count++;
     });
   });
@@ -7149,6 +7322,8 @@ function orderRows(){
 
       // 日別の作業員金額・氏名
       const dayAmt={}, dayNames={};
+      // v.90: 編集の書き戻し先を特定するため、days[d] の生配列を元index(_wi)付きで保持
+      const dayWorkers={};
       let hasDaily=false;
       Object.keys(v.days||{}).forEach(d=>{
         let arr=v.days[d];
@@ -7158,11 +7333,20 @@ function orderRows(){
         const names=arr.map(w=>String(w.n||'').trim()).filter(Boolean);
         if(amtSum>0||names.length) hasDaily=true;
         dayAmt[d]=amtSum; dayNames[d]=names;
+        dayWorkers[d]=arr.map((w,_wi)=>({n:String(w.n||'').trim(), a:parseInt(w.a)||0, _wi}));
       });
       // 旧データ互換: 日別データが無い場合は従来の合計金額(v.amt)を初日にのみ計上（合計は不変）
       const fallbackAmt=(!hasDaily && v.amt)?(parseInt(v.amt)||0):0;
 
       // 日別の諸経費（日付が案件期間内のものはその日へ、期間外・不明なものは最初の行にまとめて計上）
+      // v.90: 下の dayExpMap は「項目名で合算」してしまい書き戻し先を特定できないため、
+      //       編集用に生配列を元index(_ei)付きで別途保持する（期間内の日のみ編集可）。
+      const dayRawExp={};
+      Object.keys(v.dayExpenses||{}).forEach(d=>{
+        if(dayList.indexOf(d)<0) return;   // 期間外は編集対象外（どの行に属するか一意でない）
+        dayRawExp[d]=(v.dayExpenses[d]||[]).map((e,_ei)=>({n:String(e.n||'').trim(), a:parseInt(e.a)||0, _ei}))
+                       .filter(e=>e.n||e.a);
+      });
       const dayExpMap={}, extraExpMap={};
       Object.keys(v.dayExpenses||{}).forEach(d=>{
         (v.dayExpenses[d]||[]).forEach(e=>{
@@ -7189,9 +7373,14 @@ function orderRows(){
         const tax=Math.floor(amt*0.1);
         rows.push({
           key:c.id+'__'+v.id+'__'+vi+'__'+d,
+          cid:c.id, vi,                                   // v.90: 書き戻し先（c.vendors[vi]）
           vendorId:v.id, vendor:vendorName, date:d, name:c.name||'',
           amt, tax, total:amt+tax,
           expenses:rowExpenses,
+          rawExpenses:dayRawExp[d]||[],                   // v.90: 編集用（元index付き・期間内の日のみ）
+          extraExpenses:(first?extraExpArr:[]),           // v.90: 期間外の経費（どの日か一意でないため読み取り専用）
+          workers:hasDaily?(dayWorkers[d]||[]):[],        // v.90: 編集用（旧v.amt互換の行は編集不可）
+          note:String((v.dayNotes||{})[d]||''),           // v.91: 備考（案件×業者×日ごと）
           workerDays:names.length?[{d, names}]:[]
         });
         first=false;
@@ -7227,6 +7416,8 @@ function renderOrder(){
     +'<th style="width:92px;padding:7px 6px;text-align:right;border-bottom:1px solid var(--border)">支払(税抜)</th>'
     +'<th style="width:78px;padding:7px 6px;text-align:right;border-bottom:1px solid var(--border)">消費税</th>'
     +'<th style="width:92px;padding:7px 6px;text-align:right;border-bottom:1px solid var(--border)">税込</th>'
+    // v.91: 備考（c.vendors[vi].dayNotes[日付]＝案件×業者×日ごとに独立）
+    +'<th style="width:132px;padding:7px 6px;text-align:left;border-bottom:1px solid var(--border)">備考</th>'
     +'</tr></thead><tbody>';
   groups.forEach((g,gi)=>{
     const sel=g.items.filter(r=>!orderExcluded.has(r.key));
@@ -7238,6 +7429,7 @@ function renderOrder(){
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.amt)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.tax)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.total)}</td>
+      <td style="border-bottom:1px solid var(--border)"></td>
     </tr>`;
     g.items.forEach(r=>{
       const chk=!orderExcluded.has(r.key);
@@ -7248,20 +7440,33 @@ function renderOrder(){
         <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8">${yen(r.amt)}</td>
         <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8;color:var(--text-muted)">${yen(r.tax)}</td>
         <td style="padding:7px 6px;text-align:right;border-bottom:1px solid #F0EEE8">${yen(r.total)}</td>
+        <td style="padding:4px 6px;border-bottom:1px solid #F0EEE8">${_bizTextInput(r.note,`orderEditNote('${r.cid}',${r.vi},'${r.date}',this.value)`,120)}</td>
       </tr>`;
-      if(r.expenses&&r.expenses.length){
+      // v.90: 業者経費は内訳を1項目ずつ編集（c.vendors[vi].dayExpenses[日付][ei].a）。
+      //       期間外の経費はどの行に属するか一意に決まらないため読み取り専用で表示する。
+      const _wRow = (r.workers&&r.workers.length)||(r.workerDays&&r.workerDays.length);
+      const _expCells = (r.rawExpenses||[]).map(e=>
+          `${escHtml(e.n||'(項目名なし)')} ¥${_bizNumInput(e.a,`orderEditExpense('${r.cid}',${r.vi},'${r.date}',${e._ei},this.value)`,64)}`)
+        .concat((r.extraExpenses||[]).map(e=>
+          `${escHtml(e.n||'')} ¥${(parseInt(e.a)||0).toLocaleString()}<span style="opacity:.7">（期間外）</span>`));
+      if(_expCells.length){
         html+=`<tr>
           <td></td>
-          <td colspan="5" style="padding:2px 6px 4px 16px;border-bottom:${r.workerDays&&r.workerDays.length?'none':'1px solid #F0EEE8'};font-size:10px;color:var(--text-muted)">
-            諸経費内訳：${r.expenses.map(e=>`${escHtml(e.n||'')} ¥${(parseInt(e.a)||0).toLocaleString()}`).join('　／　')}
+          <td colspan="6" style="padding:2px 6px 4px 16px;border-bottom:${_wRow?'none':'1px solid #F0EEE8'};font-size:10px;color:var(--text-muted)">
+            諸経費内訳：${_expCells.join('　／　')}
           </td>
         </tr>`;
       }
-      if(r.workerDays&&r.workerDays.length){
+      // v.90: 作業員は1人ずつ金額を編集（c.vendors[vi].days[日付][wi].a）。
+      //       旧データ互換(v.amt を初日に計上)の行は workers が空＝日別の実体が無いので編集不可。
+      if(_wRow){
+        const _wCells = (r.workers&&r.workers.length)
+          ? r.workers.map(w=>`${escHtml(w.n||'(氏名なし)')} ¥${_bizNumInput(w.a,`orderEditWorker('${r.cid}',${r.vi},'${r.date}',${w._wi},this.value)`,64)}`)
+          : r.workerDays.map(w=>`${mdW(w.d)} ${w.names.map(n=>escHtml(n)).join('・')}`);
         html+=`<tr>
           <td></td>
-          <td colspan="5" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:var(--text-muted)">
-            作業員：${r.workerDays.map(w=>`${mdW(w.d)} ${w.names.join('・')}`).join('　／　')}
+          <td colspan="6" style="padding:2px 6px 7px 16px;border-bottom:1px solid #F0EEE8;font-size:10px;color:var(--text-muted)">
+            作業員：${_wCells.join('　／　')}
           </td>
         </tr>`;
       }
@@ -7291,7 +7496,7 @@ function orderToggleAll(checked){
 }
 function orderExportCSV(){
   const csvCell=v=>{ const s=String(v==null?'':v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
-  const lines=[['協力業者名','日付','案件名','作業員','支払金額(税抜)','諸経費内訳','消費税(10%)','税込金額'].map(csvCell).join(',')];
+  const lines=[['協力業者名','日付','案件名','作業員','支払金額(税抜)','諸経費内訳','消費税(10%)','税込金額','備考'].map(csvCell).join(',')];
   let count=0;
   // orderRows()が既に帯案件を1日ごとの行に展開済みなので、そのまま1行=1行で出力する
   orderGroups().forEach(g=>{
@@ -7299,7 +7504,7 @@ function orderExportCSV(){
       if(orderExcluded.has(r.key)) return;
       const workerDetail=(r.workerDays&&r.workerDays.length)?r.workerDays.map(w=>w.names.join('・')).join(' / '):'';
       const expDetail=(r.expenses&&r.expenses.length)?r.expenses.map(e=>`${e.n||''}¥${(parseInt(e.a)||0).toLocaleString()}`).join(' / '):'';
-      lines.push([g.vendor,r.date,r.name,workerDetail,r.amt,expDetail,r.tax,r.total].map(csvCell).join(','));
+      lines.push([g.vendor,r.date,r.name,workerDetail,r.amt,expDetail,r.tax,r.total,r.note||''].map(csvCell).join(','));
       count++;
     });
   });
