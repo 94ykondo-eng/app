@@ -1780,7 +1780,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.108';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.109';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1791,13 +1791,16 @@ const getMember = id => { const sid=String(id||''); return sid ? MEMBERS.find(m=
 // 複数担当者ヘルパー
 function getAssignees(c){ if(Array.isArray(c.assignees)&&c.assignees.filter(Boolean).length) return c.assignees.filter(Boolean); return c.assignee?[c.assignee]:[]; }
 function primaryAssignee(c){ return getAssignees(c)[0]||''; }
-function caseBarBg(c){
-  if(c.barColor) return c.barColor+'33';
+function caseBarBg(c, alpha){
+  // alpha: 16進アルファ（省略時は従来どおり '33'=20%）。複数日帯は継続セルが淡くて空欄に見えるため
+  //        v.109 で renderBandOverlay からは '59'(=35%) を渡して少し濃くする。単日バーは '33' のまま。
+  const A = alpha || '33';
+  if(c.barColor) return c.barColor+A;
   const ids=getAssignees(c);
-  if(ids.length<=1){ const m=getMember(ids[0]||''); return m?m.color+'33':'#e5e7eb'; }
+  if(ids.length<=1){ const m=getMember(ids[0]||''); return m?m.color+A:'#e5e7eb'; }
   const colors=ids.map(id=>{ const m=getMember(id); return m?m.color:'#9CA3AF'; });
   const pct=100/colors.length;
-  const stops=colors.map((col,i)=>`${col}33 ${Math.round(i*pct)}%,${col}33 ${Math.round((i+1)*pct)}%`).join(',');
+  const stops=colors.map((col,i)=>`${col}${A} ${Math.round(i*pct)}%,${col}${A} ${Math.round((i+1)*pct)}%`).join(',');
   return `linear-gradient(90deg,${stops})`;
 }
 function caseBarFg(c){ if(c.barColor) return c.barColor; const m=getMember(primaryAssignee(c)); return m?m.color:'#374151'; }
@@ -5864,7 +5867,7 @@ function renderBandOverlay(){
     const isMulti=c.start!==c.end;
     if(!isMulti) return; // 1日案件はセル内バーで処理済み
 
-    const bg=caseBarBg(c);
+    const bg=caseBarBg(c,'59');   // v.109: 複数日帯は少し濃く(35%)。継続セルが空欄に見える問題を解消
     const fg=caseBarFg(c);
     const dotColor=STATUS_COLORS[c.status]||'#9CA3AF';
     const row=items[0].row;
