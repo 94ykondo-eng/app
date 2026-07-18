@@ -147,6 +147,16 @@
   .hamburger-btn{display:none;border:none;background:none;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;color:var(--text)}
   #mobile-panel-close{display:none}
   /* 📱 モバイル日付案件一覧ポップアップ */
+  /* v.97: PC中央ダイアログ用の暗幕。モバイルでは使わない（ボトムシートのため） */
+  #mdp-backdrop{display:none;}
+  @media (min-width: 769px){
+    #mdp-backdrop{
+      position:fixed;inset:0;background:rgba(0,0,0,0.32);
+      z-index:3690;opacity:0;pointer-events:none;
+      transition:opacity 0.18s ease;
+    }
+    #mdp-backdrop.show{opacity:1;pointer-events:auto;}
+  }
   #mobile-day-popup{
     position:fixed;
     left:0;right:0;bottom:0;
@@ -165,6 +175,23 @@
     display:flex;
     flex-direction:column;
     transform:translateY(0);
+  }
+  /* v.95→v.97: PCでは画面中央にダイアログとして表示（モバイルは従来どおり全幅ボトムシート）。
+     縦もセンタリングし、角丸を全周に。出現はフェード＋軽いスケール。 */
+  @media (min-width: 769px){
+    #mobile-day-popup{
+      left:50%;right:auto;top:50%;bottom:auto;
+      width:420px;max-width:92vw;max-height:80vh;
+      border-radius:16px;border-top:1px solid var(--border);
+      box-shadow:0 12px 48px rgba(0,0,0,0.28);
+      transform:translate(-50%,-50%) scale(0.96);
+      opacity:0;
+      transition:opacity 0.18s ease, transform 0.18s ease;
+    }
+    #mobile-day-popup.show{
+      transform:translate(-50%,-50%) scale(1);
+      opacity:1;
+    }
   }
   .mdp-header{
     display:flex;align-items:center;justify-content:space-between;
@@ -187,6 +214,10 @@
   .mdp-info{flex:1;min-width:0}
   .mdp-name{font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .mdp-client{font-size:11px;color:var(--text-muted);margin-top:1px}
+  /* v.98: ポップアップ内の協力会社（カレンダーの .cal-kyo と同系統の見た目） */
+  .mdp-kyo{font-size:11px;margin-top:2px;display:flex;align-items:center;gap:4px;min-width:0}
+  .mdp-kyo-tag{font-weight:700;color:#B45309;flex-shrink:0}
+  .mdp-kyo-name{color:#155E75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .mdp-avatar{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
   .mdp-new{
     display:flex;align-items:center;justify-content:center;gap:6px;
@@ -341,7 +372,7 @@
   .day-wx .wx-emoji{font-size:12px}
   .day-wx .wx-pop{font-size:10px;color:#7A7870}
   .day-wx .wx-pop.hi{color:#185FA5;font-weight:600}
-  .event-bar{border-radius:3px;padding:1px 4px;font-size:10px;font-weight:500;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.1s;display:flex;align-items:center;gap:3px;flex-shrink:0;min-height:16px;max-height:16px;line-height:14px;box-sizing:border-box;width:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  .event-bar{border-radius:3px;padding:1px 4px;font-size:9px;font-weight:500;margin-bottom:1px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.1s;display:flex;align-items:center;gap:3px;flex-shrink:0;min-height:12px;max-height:12px;line-height:12px;box-sizing:border-box;width:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   .status-dot-cal{width:6px;height:6px;border-radius:50%;flex-shrink:0;display:inline-block}
   .event-bar:hover{opacity:0.8}
   .event-bar.warn{background:var(--warn-light);color:#92400E;border-left:2px solid var(--warn)}
@@ -426,6 +457,9 @@
   .doc-input:focus{outline:none;border-color:var(--accent)}
   .doc-add-btn{border:1px solid #93C5FD;background:#DBEAFE;border-radius:var(--radius);padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#1D4ED8;width:100%;text-align:center;transition:all 0.1s}
   .doc-add-btn:hover{border-color:var(--accent);color:#1E40AF;background:#BFDBFE}
+  /* v.102: 資料ファイルアップロードボタン（緑系で写真と区別） */
+  .doc-upload-label{display:block;border:1px solid #6EE7B7;background:#D1FAE5;border-radius:var(--radius);padding:9px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#047857;width:100%;text-align:center;box-sizing:border-box;transition:all 0.1s}
+  .doc-upload-label:hover{border-color:#10B981;color:#065F46;background:#A7F3D0}
   .vendor-item{border:1px solid var(--border);border-radius:var(--radius);padding:6px;margin-bottom:6px;background:var(--bg)}
   .vendor-row-top{display:flex;align-items:center;gap:6px}
   .vendor-select{flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--radius);padding:6px 8px;font-size:12px;background:var(--surface);color:var(--text)}
@@ -445,10 +479,10 @@
   .vw-del:hover{color:var(--danger)}
   .vw-add{font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:2px 0}
   .vendor-subtotal{text-align:right;font-size:12px;font-weight:700;color:#B45309;margin-top:6px;border-top:1px solid var(--border);padding-top:6px}
-  .cal-kyo{font-size:9px;line-height:14px;color:#155E75;background:#CFFAFE;border-radius:3px;padding:1px 4px;margin:0 4px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;display:flex;align-items:center;gap:2px;flex-shrink:0;min-height:16px;max-height:16px;box-sizing:border-box;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  .cal-kyo{font-size:9px;line-height:12px;color:#155E75;background:#CFFAFE;border-radius:3px;padding:1px 4px;margin:0 4px 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;display:flex;align-items:center;gap:2px;flex-shrink:0;min-height:12px;max-height:12px;box-sizing:border-box;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   .cal-kyo .kyo-tag{font-weight:700;color:#B45309;flex-shrink:0}
   /* メモ帯（案件に紐づかない自由メモ）。案件の下に並ぶ */
-  .cal-memo{font-size:9px;line-height:14px;border-radius:3px;padding:1px 4px;margin:0 4px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;display:flex;align-items:center;gap:3px;flex-shrink:0;min-height:16px;max-height:16px;box-sizing:border-box;border-left:2px solid rgba(0,0,0,0.25);color:#1F2937;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  .cal-memo{font-size:9px;line-height:12px;border-radius:3px;padding:1px 4px;margin:0 4px 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;display:flex;align-items:center;gap:3px;flex-shrink:0;min-height:12px;max-height:12px;box-sizing:border-box;border-left:2px solid rgba(0,0,0,0.25);color:#1F2937;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   .cal-memo .memo-icon{flex-shrink:0;opacity:0.9}
   .cal-memo .memo-lock{flex-shrink:0;opacity:0.7}
   .photo-thumb{position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;background:var(--bg);cursor:pointer}
@@ -801,8 +835,12 @@
 
     /* カレンダー本体：全幅・パディング縮小 */
     .calendar-wrap{padding:2px;height:auto;min-height:0}
-    /* モバイル：各週を固定高さにして帯の位置計算を正確に */
-    .cal-days{height:auto!important;flex:none!important}
+    /* モバイル：各週を固定高さにして帯の位置計算を正確に＆「他N件」を有効化（v.101）
+       以前は height:auto で週が中身に応じて伸び、セルの clientHeight が常に全件分になり
+       trimCalCells が畳めなかった。グリッドの固定行高(96px×週)を活かすため auto を外す。 */
+    .cal-days{flex:none!important;height:auto!important;min-height:0}
+    /* セル自身も固定高さに収め、超過分は overflow:hidden で隠す（実体は trimCalCells が畳む） */
+    .cal-day{height:96px;min-height:96px;max-height:96px}
 
     /* カレンダーセルを指で押しやすく */
     .cal-cell{min-height:64px}
@@ -1011,6 +1049,7 @@
 <div id="toast-container"></div>
 <div id="mobile-overlay" class="mobile-overlay" onclick="closeMobileSidebar()"></div>
 <!-- モバイル日付案件一覧ポップアップ -->
+<div id="mdp-backdrop" onclick="closeDayPopup()"></div>
 <div id="mobile-day-popup">
   <div class="mdp-header">
     <span class="mdp-title" id="mdp-title"></span>
@@ -1323,12 +1362,19 @@
               </div>
               <div class="doc-list" id="pf-doc-list"></div>
               <div class="doc-add-row" id="pf-doc-add" style="display:none">
-                <div style="font-size:11px;color:var(--text-muted);line-height:1.5">図面・見積書・契約書などの共有リンクを登録できます</div>
-                <label class="doc-field-label">① 表示名 <span style="color:var(--text-muted);font-weight:400">（任意）</span></label>
+                <div style="font-size:11px;color:var(--text-muted);line-height:1.5">図面・見積書・契約書などを登録できます。PDF・Excel・Word・画像・図面などをそのままアップロードできます。</div>
+                <label class="doc-field-label">① 表示名 <span style="color:var(--text-muted);font-weight:400">（任意・未入力ならファイル名）</span></label>
                 <input class="doc-input" id="pf-doc-name" placeholder="例）平面図、御見積書、仕様書 など">
-                <label class="doc-field-label">② 資料のURL <span style="color:#DC2626;font-weight:600">（必須）</span></label>
+                <!-- v.102: ファイルを選んでDriveにアップロード -->
+                <label class="doc-field-label">② ファイルをアップロード</label>
+                <label class="doc-upload-label" id="pf-doc-upload-label">
+                  📎 ファイルを選択してアップロード
+                  <input type="file" id="pf-doc-file" style="display:none" onchange="uploadDoc(this)">
+                </label>
+                <!-- URL方式も維持（大容量などアップロードできない場合の保険） -->
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">アップロードできない場合はURLでも登録できます</div>
                 <input class="doc-input" id="pf-doc-url" placeholder="GoogleドライブやPDFの共有リンクを貼り付け">
-                <button class="doc-add-btn" onclick="addDoc()">＋ この資料を追加</button>
+                <button class="doc-add-btn" onclick="addDoc()">＋ URLで資料を追加</button>
               </div>
             </div>
           </div>
@@ -1734,7 +1780,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.92';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.104';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2106,6 +2152,13 @@ function IS_MOBILE(){return window.matchMedia('(max-width:768px)').matches;}
 
 // カレンダー日セルのタップ共通処理（PC click / モバイル touchend の両方から呼ぶ）
 // IS_MOBILE 分岐に依存せず、案件の有無で分岐。空き日は新規案件フォームを開く。
+// その日のセルに「他N件」で畳まれた（=画面上見えない）案件があるか（v.95）
+// trimCalCells が hiddenCount>0 のとき .more-events を display:block にするので、それを判定に使う。
+function _dayHasHiddenCases(ds){
+  const cell=document.querySelector(`.cal-day[data-date="${ds}"]`);
+  const more=cell&&cell.querySelector('.more-events');
+  return !!(more && more.style.display==='block');
+}
 function handleDayTap(ds, t, fromTouch){
   // バー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
   // （.event-bar-spacer は段揃え用の見えない詰め物で独自ハンドラを持たないため、余白と同じく新規追加へ進める）
@@ -2114,9 +2167,14 @@ function handleDayTap(ds, t, fromTouch){
   if(fromTouch){
     // モバイル(タッチ)：案件が1件以上ある日はポップアップで選ばせる（v.79仕様）
     if(dayCases.length>=1){ showDayPopup(ds, dayCases); return; }
+  } else if(dayCases.length>=1 && _dayHasHiddenCases(ds)){
+    // PC(クリック)：セルに入り切らず「他N件」に畳まれた案件がある日は、
+    // バーを直接クリックできない案件が存在するため、モバイルと同じポップアップで全件から選ばせる（v.95）。
+    // ポップアップは閲覧が主目的なので canAdd() の判定より前に置く（追加ボタンはポップアップ側で出し分け）。
+    showDayPopup(ds, dayCases); return;
   }
-  // PC(クリック)：案件バーを直接クリックすれば詳細が開けるため、
-  // 余白クリックは案件の件数によらず常に新規追加へ進める（0件・1件・2件以上で挙動を統一）。
+  // PC(クリック)：全件見えている日は、案件バーを直接クリックすれば詳細が開けるため、
+  // 余白クリックは案件の件数によらず新規追加へ進める（v.88仕様・v.95では「他N件」がある日のみポップアップ）。
   if(!canAdd()) return;                 // 追加権限が無いロールは何もしない（仕様）
   showNewMode(true);                    // showPanel=true でモバイルでも確実に立ち上げる
   const s=document.getElementById('ap-start');
@@ -3965,6 +4023,9 @@ function renderDocSection(caseId){
       </div>`).join('')
     : `<div style="font-size:11px;color:var(--text-muted);padding:2px 0">資料はまだありません</div>`;
   if(addRow) addRow.style.display = canAdd() ? 'flex' : 'none';
+  // v.102: ファイルアップロードは管理者のみ表示（URL登録は canAdd の従来どおり）
+  const uploadLabel=document.getElementById('pf-doc-upload-label');
+  if(uploadLabel) uploadLabel.style.display = isAdmin() ? 'block' : 'none';
 }
 // 資料を追加
 async function addDoc(){
@@ -3994,6 +4055,78 @@ async function addDoc(){
   if(nameEl) nameEl.value='';
   beginSave();
   saveCase_GAS(c).then(()=>endSave()).catch(()=>endSave());
+}
+// v.102: 資料ファイルをDriveにアップロードして c.docs に登録（管理者のみ）
+// 写真の uploadPhoto 経路を資料に流用。圧縮せず元の形式のまま送信する。
+async function uploadDoc(input){
+  if(roGuard()) return;
+  if(!isAdmin()){ alert('資料のアップロードは管理者のみ可能です'); input.value=''; return; }
+  if(!input.files || !input.files.length) return;
+  const caseId = panelCaseId;
+  const c = cases.find(x=>String(x.id)===String(caseId));
+  if(!c){ alert('先に案件を開いてください'); input.value=''; return; }
+  const file = input.files[0];
+  const nameEl = document.getElementById('pf-doc-name');
+  const displayName = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : file.name;   // 未入力ならファイル名
+
+  // アップロード中オーバーレイ（写真と同じものを流用）
+  const label = document.getElementById('pf-doc-upload-label');
+  if(label) label.style.opacity='0.5';
+  const overlay    = document.getElementById('upload-overlay');
+  const overlayMsg = document.getElementById('upload-overlay-msg');
+  const overlayProg = document.getElementById('upload-overlay-prog');
+  if(overlay) overlay.classList.add('active');
+  if(overlayMsg) overlayMsg.textContent = '📎 資料をアップロード中…';
+  if(overlayProg) overlayProg.style.width = '30%';
+
+  try{
+    const base64 = await fileToBase64(file);   // 圧縮なしでそのままbase64化
+    const now = new Date();
+    const uploadedAt = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0')+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+    if(overlayProg) overlayProg.style.width = '60%';
+
+    const res = await gasPost({
+      action:'uploadDoc', caseId:String(caseId), caseName:c.name, caseStart:c.start,
+      base64, mimeType:file.type||'application/octet-stream',
+      fileName:file.name, uploadedBy:currentUser||'', uploadedAt
+    });
+    if(overlayProg) overlayProg.style.width = '90%';
+
+    if(!res || res.ok===false || !res.url){
+      throw new Error((res&&res.error) ? res.error : 'アップロードに失敗しました');
+    }
+    // 返ってきた共有リンクを c.docs に登録（fileNameには表示名、urlにDriveリンク）
+    const id='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    const doc={id, caseId:String(caseId), caseName:c.name, fileName:displayName, url:res.url, fileId:res.fileId||'', uploadedBy:currentUser||'', uploadedAt};
+    if(!Array.isArray(c.docs)) c.docs=[];
+    c.docs.push(doc);
+    if(Array.isArray(c.deletedDocs)) c.deletedDocs=c.deletedDocs.filter(x=>x!==id);
+    saveCacheLS();
+    renderDocSection(caseId);
+    if(typeof renderCal==='function') renderCal();   // 添付インジケータを即反映
+    if(nameEl) nameEl.value='';
+    // c.docsをGASの案件データにも同期
+    beginSave();
+    saveCase_GAS(c).then(()=>endSave()).catch(()=>endSave());
+  }catch(err){
+    alert('資料のアップロードに失敗しました: '+err.message+'\n（容量が大きい場合は、下のURL欄からの登録をお試しください）');
+  }finally{
+    if(overlayProg) overlayProg.style.width='100%';
+    await new Promise(r=>setTimeout(r,300));
+    if(overlay) overlay.classList.remove('active');
+    if(overlayProg) overlayProg.style.width='0%';
+    if(label) label.style.opacity='';
+    input.value='';   // 同じファイルを再選択できるように
+  }
+}
+// v.102: 圧縮なしでファイルをbase64（dataURL）に変換
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>resolve(e.target.result);
+    reader.onerror=()=>reject(new Error('ファイルの読み込みに失敗しました'));
+    reader.readAsDataURL(file);
+  });
 }
 // 資料を削除（リンク先ファイル自体は削除しない）
 async function deleteDoc(docId, caseId){
@@ -4940,12 +5073,16 @@ function showDayPopup(ds, dayCases){
     })();
     const barBg=caseBarBg(c); // カレンダーバーと同じ色（透明度付き）
     const fg=caseBarFg(c);    // 文字・ボーダー色
+    // その日の協力会社（カレンダーの .cal-kyo と同じ内容）をポップアップにも表示（v.98）
+    const _kyoLabel=caseVendorDayLabel(c, ds);
+    const kyoStr=_kyoLabel?`<div class="mdp-kyo"><span class="mdp-kyo-tag">${_caseVendorDayTag(c, ds)}</span><span class="mdp-kyo-name">${escHtml(_kyoLabel)}</span></div>`:'';
     html+=`<div class="mdp-item" onclick="closeDayPopup();openDetail('${c.id}','${ds}')"
       style="background:${barBg};border-left:3px solid ${fg}">
       <div class="mdp-dot" style="background:${dotColor}"></div>
       <div class="mdp-info">
         <div class="mdp-name">${escHtml(c.name)}</div>
         ${clientStr}
+        ${kyoStr}
       </div>
       ${avatar}
     </div>`;
@@ -4959,12 +5096,43 @@ function showDayPopup(ds, dayCases){
   }
   listEl.innerHTML=html;
 
+  document.getElementById('mdp-backdrop')?.classList.add('show');   // v.97: PC中央表示時の暗幕（モバイルはCSSで非表示）
   popup.classList.add('show');
+  // v.99: ポップアップの外側をクリック/タップしたら閉じる（PCの暗幕に加え、暗幕の無いモバイルでも効かせる）。
+  // 開いた瞬間の同じクリックで即閉じしないよう、リスナー登録は次のティックに遅延する。
+  _bindDayPopupOutside();
+}
+
+// ポップアップ外クリックの購読管理（多重登録を防ぐため単一ハンドラを付け外しする）
+let _dayPopupOutsideHandler=null;
+function _bindDayPopupOutside(){
+  _unbindDayPopupOutside();
+  _dayPopupOutsideHandler=(e)=>{
+    const popup=document.getElementById('mobile-day-popup');
+    if(!popup || !popup.classList.contains('show')) return;
+    // ポップアップ本体の内側なら閉じない（項目/新規追加/×は各自のonclickで処理される）
+    if(e.target.closest && e.target.closest('#mobile-day-popup')) return;
+    closeDayPopup();
+  };
+  // 次のティックで登録（この関数を呼んだクリックイベントを拾わないため）
+  setTimeout(()=>{
+    if(!_dayPopupOutsideHandler) return;
+    document.addEventListener('mousedown', _dayPopupOutsideHandler, true);
+    document.addEventListener('touchstart', _dayPopupOutsideHandler, true);
+  },0);
+}
+function _unbindDayPopupOutside(){
+  if(!_dayPopupOutsideHandler) return;
+  document.removeEventListener('mousedown', _dayPopupOutsideHandler, true);
+  document.removeEventListener('touchstart', _dayPopupOutsideHandler, true);
+  _dayPopupOutsideHandler=null;
 }
 
 function closeDayPopup(){
   const popup=document.getElementById('mobile-day-popup');
   if(popup) popup.classList.remove('show');
+  document.getElementById('mdp-backdrop')?.classList.remove('show');
+  _unbindDayPopupOutside();   // v.99: 外側クリック購読を解除
   hideMobileOverlay();
 }
 
@@ -5363,6 +5531,41 @@ function renderCal(){
     });
   });
 
+  // ===== 協力会社ラベルの段予約（v.93・かぶり修正） =====
+  // .cal-kyo は「その案件のバーの直下」に段の間へ挿入されるため、協ラベルの有無が
+  // セルごとに違うと、下の段のプレースホルダーの縦位置が週内でずれる。
+  // renderBandOverlay は週セグメント先頭セルの top だけで帯を1本描くので、
+  // ずれたセルでは帯が隣の協ラベルにかぶって描画されていた。
+  // → 同じ週・同じ段の案件が1日でも協ラベルを持つなら、その週の全セルで
+  //   段の直下にラベル1行分を確保する（無い日は透明スペーサー＝v.86の流儀）。
+  const weekRowKyo={};   // `${week}:${row}` → true
+  cells.forEach((cell,i)=>{
+    if(!cell.ds) return;
+    cellCases[i].forEach(c=>{
+      if(caseVendorDayLabel(c, cell.ds)) weekRowKyo[cell.week+':'+(caseRow[c.id]||0)]=true;
+    });
+  });
+  // v.94: 予約が要るのは「複数日の帯（band-overlay-bar）がその段より下を通るセル」だけ。
+  // 帯は週セグメント先頭セルの top で1本描かれるため、セグメント内の全セルで
+  // 上に積まれる高さが揃っていなければならない（→予約で揃える）。
+  // 一方、単日バーしか無いセルはセル内で完結し、揃える必要が無い
+  // （v.93は週の全セルに予約して無用な隙間を作っていた）。
+  // セグメント内の全セルはその帯自身を含む＝この条件で必ずセグメント全体が同時に予約され、整合が保たれる。
+  const cellMaxBandRow={}; // cellIdx → そのセルにある複数日案件の最大row（無ければ-1）
+  cells.forEach((cell,i)=>{
+    let mx=-1;
+    cellCases[i].forEach(c=>{ if(c.start!==c.end) mx=Math.max(mx, caseRow[c.id]||0); });
+    cellMaxBandRow[i]=mx;
+  });
+  const _kyoSpacer=()=>{
+    // .cal-kyo と同じ箱（高さ16/12px + 下マージン1px）。クリックはセルへ透過させる。
+    const sp=document.createElement('div');
+    sp.className='cal-kyo-spacer';
+    const _h=IS_MOBILE()?12:12;
+    sp.style.cssText=`min-height:${_h}px;max-height:${_h}px;margin:0 4px 1px;flex-shrink:0;pointer-events:none;box-sizing:border-box;`;
+    return sp;
+  };
+
   cells.forEach((cell,idx)=>{
     // 前月・翌月セルでは複数日案件のプレースホルダーのみ表示（1日案件は出さない）
     const onlyMulti=cell.isOther;
@@ -5382,9 +5585,11 @@ function renderCal(){
         // 段を揃えるための「見えない詰め物」なので、クリックはセルへ透過させる（余白と同じ挙動にする）
         const spacer=document.createElement('div');
         spacer.className='event-bar-spacer';
-        const _spH=IS_MOBILE()?12:16;
-        spacer.style.cssText=`min-height:${_spH}px;max-height:${_spH}px;margin-bottom:2px;flex-shrink:0;pointer-events:none;`;
+        const _spH=IS_MOBILE()?12:12;
+        spacer.style.cssText=`min-height:${_spH}px;max-height:${_spH}px;margin-bottom:1px;flex-shrink:0;pointer-events:none;`;
         cell.el.appendChild(spacer);
+        // この週・この段に協ラベルの予約があり、かつこのセルを下段の帯が通るなら高さを確保（v.93→v.94で条件を絞る）
+        if(weekRowKyo[cell.week+':'+row] && cellMaxBandRow[idx]>row) cell.el.appendChild(_kyoSpacer());
         continue;
       }
 
@@ -5430,13 +5635,13 @@ function renderCal(){
       // 複数日案件はプレースホルダー（高さ確保）、名前はrenderBandOverlayでCSS Grid spanで表示
       if(isMulti){
         bar.classList.add('band-placeholder');
-        const _phH=IS_MOBILE()?12:16;
-        bar.style.cssText=`visibility:hidden;width:100%;min-height:${_phH}px;max-height:${_phH}px;margin-bottom:2px;flex-shrink:0;`;
+        const _phH=IS_MOBILE()?12:12;
+        bar.style.cssText=`visibility:hidden;width:100%;min-height:${_phH}px;max-height:${_phH}px;margin-bottom:1px;flex-shrink:0;`;
         bar.innerHTML='&nbsp;';
         bar.dataset.row=String(caseRow[c.id]||0);
       } else {
         // 1日案件：セル内に直接表示
-        bar.style.cssText=`background:${c.warn?'':bg};color:${fg};border-left:2px solid ${fg};border-radius:3px;padding:${IS_MOBILE()?'0 2px':'1px 4px'};margin:0 4px 2px;width:calc(100% - 8px);min-height:${IS_MOBILE()?12:16}px;max-height:${IS_MOBILE()?12:16}px;box-sizing:border-box;`;
+        bar.style.cssText=`background:${c.warn?'':bg};color:${fg};border-left:2px solid ${fg};border-radius:3px;padding:${IS_MOBILE()?'0 2px':'0 4px'};margin:0 4px 1px;width:calc(100% - 8px);min-height:${IS_MOBILE()?12:12}px;max-height:${IS_MOBILE()?12:12}px;box-sizing:border-box;`;
         const _allAssignees=getAssignees(c);
         const _vendorIds=new Set(MEMBERS.filter(m=>m.role==='vendor').map(m=>String(m.id||'')));
         const _nonVendors=_allAssignees.filter(id=>!_vendorIds.has(String(id)));
@@ -5459,19 +5664,16 @@ function renderCal(){
       {
         const kyoLabel=caseVendorDayLabel(c, cell.ds);
         if(kyoLabel){
-          let workerCount=0;
-          (c.vendors||[]).forEach(v=>{
-            const ws=v.days&&v.days[cell.ds];
-            if(Array.isArray(ws)) workerCount+=ws.filter(w=>String(w.n||'').trim()).length;
-            else if(typeof ws==='string'&&ws.trim()) workerCount++;
-          });
-          const kyoTag=workerCount>0?`【協：${workerCount}名】`:'【協】';
+          const kyoTag=_caseVendorDayTag(c, cell.ds);
           const kc=document.createElement('div');
           kc.className='cal-kyo';
           kc.dataset.caseid=c.id;
           kc.innerHTML=`<span class="kyo-tag">${kyoTag}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(kyoLabel)}</span>`;
           kc.onclick=e=>{e.stopPropagation();openDetail(c.id, cell.ds);};
           cell.el.appendChild(kc);
+        } else if(weekRowKyo[cell.week+':'+row] && cellMaxBandRow[idx]>row){
+          // 同じ週・同じ段に協ラベルの日があり、このセルを下段の帯が通る → 無い日も高さを揃える（v.93→v.94で条件を絞る）
+          cell.el.appendChild(_kyoSpacer());
         }
       }
     }
@@ -5578,7 +5780,7 @@ function renderBandOverlay(){
   const numWeeks=window._bandWeeks||6;
   const STATUS_COLORS={'未対応':'#9CA3AF','日延':'#FBBF24','完了':'#10B981'};
   const _mob=IS_MOBILE();
-  const _bandH=_mob?12:16;
+  const _bandH=_mob?12:12;
 
   // プレースホルダーからcaseId→{cell,row}のマップを作成
   const byCase={};
@@ -5659,11 +5861,11 @@ function renderBandOverlay(){
         color:${c.warn?'#92400E':fg};
         ${showBorder?`border-left:2px solid ${c.warn?'var(--warn)':fg};`:''}
         border-radius:${radius};
-        padding:${_mob?'0 2px':'1px 4px'};
+        padding:${_mob?'0 2px':'0 4px'};
         display:flex;align-items:center;gap:3px;
         overflow:hidden;white-space:nowrap;
-        font-size:${_mob?'8px':'10px'};font-weight:500;
-        line-height:${_mob?'12px':'14px'};
+        font-size:${_mob?'8px':'9px'};font-weight:500;
+        line-height:${_mob?'12px':'12px'};
         cursor:pointer;
         z-index:3;
         box-sizing:border-box;
@@ -5716,33 +5918,50 @@ function buildBarAvatars(nonVendors, hasVendor){
 
 function trimCalCells(){
   const _mob=IS_MOBILE();
-  const BAR_H  = _mob?14:18;   // モバイルは 12px+余白2px=14px/本（枠いっぱいまで表示）
-  const MORE_H = _mob?13:16;
+  const BAR_H  = _mob?13:13;   // v.104: PCもバー本体12px化→段13px（12+余白1）でモバイルと共通
+  const KYO_H  = _mob?13:13;   // 協ラベル/予約スペーサー: 同上
+  const MEMO_H = _mob?13:13;   // メモ帯: 同上（畳まず高さだけ差し引く）
+  const MORE_H = _mob?13:13;   // v.104: 他N件チップもPC 16→13（本体縮小に合わせ）
   const DN_H   = 28;  // 日付領域の高さ（_topOffsetと一致）
 
   document.querySelectorAll('.cal-day').forEach(cell=>{
-    // バーとスペーサーの両方を取得（row順に並んでいる）
-    const rows=[...cell.querySelectorAll('.event-bar, .event-bar-spacer')];
-    const more=cell.querySelector('.more-events');
-    if(!rows.length) return;
-
-    const cellH=cell.clientHeight;
-    const available=cellH - DN_H;
-    let maxFit=Math.floor(available / BAR_H);
-    const hasMore = rows.length > maxFit;
-    if(hasMore) maxFit=Math.max(0, Math.floor((available - MORE_H) / BAR_H));
-    maxFit=Math.max(0, maxFit);
-
-    // 実際のバー（スペーサー除く）でhidden数を計算
-    const realBars=rows.filter(r=>r.classList.contains('event-bar'));
-    let hiddenCount=0;
-    rows.forEach((row,i)=>{
-      if(i < maxFit){
-        row.style.display=row.classList.contains('event-bar') ? 'flex' : 'block';
-      } else {
-        row.style.display='none';
-        if(row.classList.contains('event-bar')) hiddenCount++;
+    // v.96: 「段」を単位にまとめる。1段 = バー(またはスペーサー) ＋ 直後の協ラベル(またはその予約スペーサー)。
+    // 従来はバーの本数×BAR_Hだけで計算していたため、協ラベルやスペーサーの分だけ
+    // 実高さが超過し、「他N件」にならずにセルからはみ出していた。
+    // 段ごと畳むことで、隠れたバーの協ラベルだけが残る「幽霊ラベル」も防ぐ。
+    const units=[];
+    [...cell.children].forEach(el=>{
+      const cls=el.classList;
+      if(cls.contains('event-bar')||cls.contains('event-bar-spacer')){
+        units.push({row:el, kyo:[], h:BAR_H});
+      } else if((cls.contains('cal-kyo')||cls.contains('cal-kyo-spacer')) && units.length){
+        const u=units[units.length-1]; u.kyo.push(el); u.h+=KYO_H;
       }
+    });
+    const more=cell.querySelector('.more-events');
+    if(!units.length) return;
+
+    // メモ帯は案件ではないので畳まない（他N件の件数は案件のみ）。高さだけ先に差し引く。
+    const memoH=cell.querySelectorAll('.cal-memo').length * MEMO_H;
+    const cellH=cell.clientHeight;
+    const fits=n=>{ let s=0; for(let i=0;i<n;i++) s+=units[i].h; return s; };
+
+    let budget=cellH - DN_H - memoH;
+    let maxFit=units.length;
+    while(maxFit>0 && fits(maxFit)>budget) maxFit--;
+    const hasMore = maxFit < units.length;
+    if(hasMore){
+      budget-=MORE_H;                 // 「他N件」チップの分を確保して詰め直す
+      maxFit=units.length;
+      while(maxFit>0 && fits(maxFit)>budget) maxFit--;
+    }
+
+    let hiddenCount=0;
+    units.forEach((u,i)=>{
+      const show=i<maxFit;
+      u.row.style.display = show ? (u.row.classList.contains('event-bar') ? 'flex' : 'block') : 'none';
+      u.kyo.forEach(k=>{ k.style.display = show ? '' : 'none'; });   // ''=CSS既定(flex/block)に戻す
+      if(!show && u.row.classList.contains('event-bar')) hiddenCount++;
     });
     if(more){
       if(hiddenCount > 0){
@@ -5916,6 +6135,17 @@ function caseVendorDayLabel(c, ds){
   });
   return parts.join('／');
 }
+// その日の協力会社タグ（【協：N名】／作業員未入力なら【協】）。カレンダーとポップアップで共用（v.98）。
+function _caseVendorDayTag(c, ds){
+  let workerCount=0;
+  (c&&c.vendors||[]).forEach(v=>{
+    if(!v.id) return;
+    const ws=v.days&&v.days[ds];
+    if(Array.isArray(ws)) workerCount+=ws.filter(w=>String(w.n||'').trim()).length;
+    else if(typeof ws==='string'&&ws.trim()) workerCount++;
+  });
+  return workerCount>0?`【協：${workerCount}名】`:'【協】';
+}
 // 保存直前にDOMからvendor入力値を読み直す（onchange未発火対策）
 function syncVendorInputs(){
   const body=document.getElementById('pf-vendors-body'); if(!body) return;
@@ -6031,10 +6261,14 @@ function renderVendors(editable){
           const eDay=es.reduce((t,e)=>t+(parseInt(e.a)||0),0);
           grandW+=wDay; grandE+=eDay;
           const dTot=wDay+eDay;
-          if(admin&&(wDay||eDay)){
+          if(admin&&(ws.length||eDay)){
+            // 作業員名は金額の有無にかかわらず必ず表示（金額があれば併記）。
+            // 以前は金額(wDay)が真のときだけ「日付：金額」を出していたため、
+            // 金額未入力だと作業員名ごと消えていた不具合を修正（作業員名を主・金額を従に）。
+            const nameStr=ws.map(w=>escHtml(w.n)).join('・');
             const expLines=es.map(e=>`<div style="font-size:10px;color:var(--text-muted);margin-left:12px">└ ${escHtml(e.n||'')}：${yen(parseInt(e.a)||0)}</div>`).join('');
             return `<div style="margin-left:4px;margin-bottom:4px">
-              <div style="font-size:11px;color:var(--text-muted)">${mdW(d)}：<span style="font-weight:600;color:#B45309">${wDay?yen(wDay):''}</span></div>
+              <div style="font-size:11px;color:var(--text-muted)">${mdW(d)}：<span style="color:var(--text)">${nameStr||'—'}</span>${wDay?` <span style="font-weight:600;color:#B45309">${yen(wDay)}</span>`:''}</div>
               ${expLines}
             </div>`;
           } else if(!admin){
