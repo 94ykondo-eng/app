@@ -1780,7 +1780,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.104';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.108';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2506,6 +2506,29 @@ document.addEventListener('click', e=>{
   }
 });
 
+// v.106: 案件の日付を delta 日ずらす際、日付キーで持つデータ（estDaily・各協力会社の
+//   days/dayExpenses/dayNotes）のキーも同じ delta で付け替える。
+//   これをしないと、コピー/移動で start/end だけずれてキーが旧日付に残り、
+//   新しい日付では作業員・金額・備考が「消える」（協ラベルが会社名だけ・【協】になる）。
+function shiftCaseDateKeys(c, delta){
+  if(!c || !delta) return;                 // 同日コピー(delta=0)は変換不要
+  const remap=(obj)=>{
+    if(!obj || typeof obj!=='object' || Array.isArray(obj)) return obj;
+    const out={};
+    Object.keys(obj).forEach(k=>{
+      const nk=/^\d{4}-\d{2}-\d{2}$/.test(k) ? addDaysStr(k, delta) : k; // 日付キーのみずらす
+      out[nk]=obj[k];
+    });
+    return out;
+  };
+  if(c.estDaily) c.estDaily=remap(c.estDaily);
+  (c.vendors||[]).forEach(v=>{
+    if(v.days)        v.days=remap(v.days);
+    if(v.dayExpenses) v.dayExpenses=remap(v.dayExpenses);
+    if(v.dayNotes)    v.dayNotes=remap(v.dayNotes);
+  });
+}
+
 function dragDialogAction(action){
   if(roGuard()) return;
   const dlg=document.getElementById('drag-dialog');
@@ -2524,6 +2547,7 @@ function dragDialogAction(action){
   if(action==='move'){
     c.start=addDaysStr(c.start,delta);
     c.end=addDaysStr(c.end,delta);
+    shiftCaseDateKeys(c,delta);          // v.106: 作業員・金額・備考のキーも同じ日数ずらす
     saveCase_GAS(c);
     logActivity('変更', c);
     saveCacheLS();
@@ -2535,6 +2559,7 @@ function dragDialogAction(action){
     copy.id=genId();
     copy.start=addDaysStr(c.start,delta);
     copy.end=addDaysStr(c.end,delta);
+    shiftCaseDateKeys(copy,delta);       // v.106: 作業員・金額・備考のキーも同じ日数ずらす
     copy.comments=[];
     copy.photos=[...(c.photos||[])];
     cases.push(copy);
@@ -2632,6 +2657,7 @@ function caseMoveDialogAction(action){
   if(action==='move'){
     c.start=addDaysStr(c.start,delta);
     c.end=addDaysStr(c.end,delta);
+    shiftCaseDateKeys(c,delta);          // v.106: 作業員・金額・備考のキーも同じ日数ずらす
     saveCase_GAS(c);
     logActivity('変更', c);
     saveCacheLS();
@@ -2642,6 +2668,7 @@ function caseMoveDialogAction(action){
     copy.id=genId();
     copy.start=addDaysStr(c.start,delta);
     copy.end=addDaysStr(c.end,delta);
+    shiftCaseDateKeys(copy,delta);       // v.106: 作業員・金額・備考のキーも同じ日数ずらす
     copy.comments=[];
     copy.photos=[...(c.photos||[])];
     cases.push(copy);
@@ -5487,39 +5514,50 @@ function renderCal(){
     getAssignees(c).some(id=>visibleMembers.has(id))&&statuses.has(c.status)&&canViewCase(c)
   );
 
-  // 帯レイアウト: 案件ごとに1つのrowを割り当て（週をまたいでも同じrow）
+  // 帯レイアウト: 案件ごとに1つのrowを割り当て（週をまたいでも同じrow＝1本のまっすぐな帯）
   const caseRow={};   // caseId → row番号
-  // rowSlots[row] = [{start:cellIdx, end:cellIdx}] で占有範囲を管理
-  const rowSlots=[];  // rowSlots[row] = [{start,end}]
-
-  // 案件を「期間が長い順」にソート（長い帯を上の段に固定→全セルで同じ段に来て繋がる）
-  // 同じ長さなら開始日が早い順
   const _dayNum=ds=>{ const [y,m,d]=String(ds||'').split('-').map(Number); return (y||0)*10000+(m||0)*100+(d||0); };
   const _span=c=>{ return _dayNum(c.end)-_dayNum(c.start); }; // 期間（長いほど大きい）
-  const sorted=[...visibleCases].sort((a,b)=>{
-    const sa=_span(a), sb=_span(b);
-    if(sa!==sb) return sb-sa;          // 期間が長い順（降順）
-    return a.start<b.start?-1:1;        // 同じ長さなら開始日が早い順
-  });
+  const _byStart=(a,b)=> a.start<b.start?-1:a.start>b.start?1:0;
+  // 既定順（従来どおり span 降順）。後段の cellCases / 協予約(v.107) はこの順で回す（順序非依存だが従来を踏襲）
+  const sorted=[...visibleCases].sort((a,b)=>{ const d=_span(b)-_span(a); return d||_byStart(a,b); });
 
-  sorted.forEach(c=>{
-    const idxList=cells.map((cell,i)=>(cell.ds&&cell.ds>=c.start&&cell.ds<=c.end)?i:-1).filter(i=>i>=0);
-    if(!idxList.length) return;
-    const startIdx=Math.min(...idxList);
-    const endIdx=Math.max(...idxList);
-
-    // 使えるrow（全セル範囲で衝突しないもの）を探す
-    let row=0;
-    while(true){
-      if(!rowSlots[row]){rowSlots[row]=[];}
-      const conflict=rowSlots[row].some(s=>startIdx<=s.end && endIdx>=s.start);
-      if(!conflict) break;
-      row++;
-    }
-    if(!rowSlots[row]) rowSlots[row]=[];
-    rowSlots[row].push({start:startIdx,end:endIdx});
-    caseRow[c.id]=row;
+  // v.108: 段割り当ての空き最小化。帯は期間中1段のまま（まっすぐさ維持）だが、割り当ての「並び順」を
+  //   複数試し、空き段が最小＝Σ(各セルの最大row) が最小になる結果を採用する。
+  //   ・現行の並び(span降順)も候補に含む → 絶対に悪化しない
+  //   ・各並びとも first-fit（最小の非衝突row）なので衝突は起きず、帯は1段のまま
+  //   重なる2帯は数学的に片側へ必ず1つ空きが残るが、3本以上が絡む配置では順序で空きを削減できる。
+  const _rangeCache=new Map();
+  visibleCases.forEach(c=>{
+    const l=cells.map((cell,i)=>(cell.ds&&cell.ds>=c.start&&cell.ds<=c.end)?i:-1).filter(i=>i>=0);
+    _rangeCache.set(c.id, l.length?[Math.min(...l),Math.max(...l)]:null);
   });
+  const _assignByOrder=order=>{
+    const cr={}, slots=[];
+    order.forEach(c=>{
+      const rg=_rangeCache.get(c.id); if(!rg){ cr[c.id]=0; return; }
+      const s=rg[0], e=rg[1]; let row=0;
+      while(true){ if(!slots[row])slots[row]=[]; if(!slots[row].some(x=>s<=x.end&&e>=x.start))break; row++; }
+      slots[row].push({start:s,end:e}); cr[c.id]=row;
+    });
+    return cr;
+  };
+  const _gapScore=cr=>{
+    // 案件が乗る各セルの「最大row」の総和（小さいほど空き段が少ない）
+    const mx={};
+    visibleCases.forEach(c=>{ const rg=_rangeCache.get(c.id); if(!rg)return; const r=cr[c.id]||0; for(let i=rg[0];i<=rg[1];i++){ if(mx[i]===undefined||r>mx[i]) mx[i]=r; } });
+    let s=0; for(const k in mx) s+=mx[k]; return s;
+  };
+  const _orders=[
+    sorted,                                                                       // 現行: span降順
+    [...visibleCases].sort((a,b)=> _byStart(a,b) || (_span(b)-_span(a))),          // 開始昇順→長い順(left-edge)
+    [...visibleCases].sort((a,b)=> _byStart(a,b) || (_span(a)-_span(b))),          // 開始昇順→短い順
+    [...visibleCases].sort((a,b)=>{ const d=(a.end<b.end?-1:a.end>b.end?1:0); return d||_byStart(a,b); }),  // 終了昇順
+    [...visibleCases].sort((a,b)=>{ const d=(a.end<b.end?1:a.end>b.end?-1:0); return d||_byStart(a,b); }),  // 終了降順
+  ];
+  let _bestScore=Infinity, _bestCr=null;
+  _orders.forEach(ord=>{ const cr=_assignByOrder(ord); const sc=_gapScore(cr); if(sc<_bestScore){ _bestScore=sc; _bestCr=cr; } });
+  Object.assign(caseRow, _bestCr || {});
 
   // 各セルに帯バーを配置
   // セルごとに案件→rowでソートして挿入
@@ -5531,32 +5569,56 @@ function renderCal(){
     });
   });
 
-  // ===== 協力会社ラベルの段予約（v.93・かぶり修正） =====
-  // .cal-kyo は「その案件のバーの直下」に段の間へ挿入されるため、協ラベルの有無が
-  // セルごとに違うと、下の段のプレースホルダーの縦位置が週内でずれる。
-  // renderBandOverlay は週セグメント先頭セルの top だけで帯を1本描くので、
-  // ずれたセルでは帯が隣の協ラベルにかぶって描画されていた。
-  // → 同じ週・同じ段の案件が1日でも協ラベルを持つなら、その週の全セルで
-  //   段の直下にラベル1行分を確保する（無い日は透明スペーサー＝v.86の流儀）。
-  const weekRowKyo={};   // `${week}:${row}` → true
+  // ===== 協力会社ラベルの段予約（v.93〜／v.107でセグメント単位の不動点に刷新） =====
+  // .cal-kyo は「その案件のバーの直下」に挿入されるため、協ラベルの有無がセルごとに違うと
+  // 下段（帯）のプレースホルダーの縦位置が週内でずれ、renderBandOverlay の帯が隣にかぶる。
+  // → 各複数日帯の「週内の連続セグメント」ごとに、その帯より上の段 r に協スロットが
+  //   1セルでも要るなら、セグメント全セルで段 r にスロット（実ラベル or 透明スペーサー）を確保。
+  // v.107: 旧実装は weekRowKyo（週×段が1日でも協なら全週予約）＋cellMaxBandRow ゲートで、
+  //   ある帯セグメントの協ラベルが、同週・同段より下を通る「別の帯セグメント」にまで
+  //   空きスペーサー（幽霊空き段）を漏らしていた。セグメント単位＋不動点伝播で漏れを断つ。
+
+  // (1) 各セルの「実協ラベルがある段」を集める（伝播の起点）
+  const needKyo = {};                       // idx -> Set(row)
+  cells.forEach((_,i)=>{ needKyo[i]=new Set(); });
   cells.forEach((cell,i)=>{
     if(!cell.ds) return;
     cellCases[i].forEach(c=>{
-      if(caseVendorDayLabel(c, cell.ds)) weekRowKyo[cell.week+':'+(caseRow[c.id]||0)]=true;
+      if(caseVendorDayLabel(c, cell.ds)) needKyo[i].add(caseRow[c.id]||0);
     });
   });
-  // v.94: 予約が要るのは「複数日の帯（band-overlay-bar）がその段より下を通るセル」だけ。
-  // 帯は週セグメント先頭セルの top で1本描かれるため、セグメント内の全セルで
-  // 上に積まれる高さが揃っていなければならない（→予約で揃える）。
-  // 一方、単日バーしか無いセルはセル内で完結し、揃える必要が無い
-  // （v.93は週の全セルに予約して無用な隙間を作っていた）。
-  // セグメント内の全セルはその帯自身を含む＝この条件で必ずセグメント全体が同時に予約され、整合が保たれる。
-  const cellMaxBandRow={}; // cellIdx → そのセルにある複数日案件の最大row（無ければ-1）
-  cells.forEach((cell,i)=>{
-    let mx=-1;
-    cellCases[i].forEach(c=>{ if(c.start!==c.end) mx=Math.max(mx, caseRow[c.id]||0); });
-    cellMaxBandRow[i]=mx;
+
+  // (2) 複数日帯を「週内の連続セル run」＝セグメントに分割
+  const bandSegs = [];                      // {cells:[idx...], rB}
+  sorted.forEach(c=>{
+    if(c.start===c.end) return;             // 帯（複数日）のみ
+    const rB = caseRow[c.id]||0;
+    const present = cells.map((cell,i)=> (cell.ds && cell.ds>=c.start && cell.ds<=c.end)?i:-1).filter(i=>i>=0);
+    let run=[];
+    const flush=()=>{ if(run.length){ bandSegs.push({cells:run.slice(), rB}); run=[]; } };
+    present.forEach(i=>{
+      if(!run.length){ run.push(i); return; }
+      const prev=run[run.length-1];
+      if(cells[i].week===cells[prev].week && cells[i].col===cells[prev].col+1) run.push(i);
+      else { flush(); run.push(i); }
+    });
+    flush();
   });
+
+  // (3) 不動点伝播：各帯セグメントで r<rB のどれかのセルが協スロットを要るなら、
+  //     そのセグメント全セルの段 r に伝播（＝帯をまっすぐ保つための予約）。増加のみで必ず収束。
+  //     こうすると、協ラベルは自分と同じ帯セグメントの並びにしか波及せず、別セグメントは無関係。
+  let _kyoChanged=true, _kyoGuard=0;
+  while(_kyoChanged && _kyoGuard++<64){
+    _kyoChanged=false;
+    bandSegs.forEach(seg=>{
+      for(let r=0; r<seg.rB; r++){
+        if(seg.cells.some(i=>needKyo[i].has(r))){
+          seg.cells.forEach(i=>{ if(!needKyo[i].has(r)){ needKyo[i].add(r); _kyoChanged=true; } });
+        }
+      }
+    });
+  }
   const _kyoSpacer=()=>{
     // .cal-kyo と同じ箱（高さ16/12px + 下マージン1px）。クリックはセルへ透過させる。
     const sp=document.createElement('div');
@@ -5588,8 +5650,8 @@ function renderCal(){
         const _spH=IS_MOBILE()?12:12;
         spacer.style.cssText=`min-height:${_spH}px;max-height:${_spH}px;margin-bottom:1px;flex-shrink:0;pointer-events:none;`;
         cell.el.appendChild(spacer);
-        // この週・この段に協ラベルの予約があり、かつこのセルを下段の帯が通るなら高さを確保（v.93→v.94で条件を絞る）
-        if(weekRowKyo[cell.week+':'+row] && cellMaxBandRow[idx]>row) cell.el.appendChild(_kyoSpacer());
+        // この週・この段に協ラベルの予約があり、かつこのセルを下段の帯が通るなら高さを確保（v.93→v.94→v.107）
+        if(needKyo[idx] && needKyo[idx].has(row)) cell.el.appendChild(_kyoSpacer());
         continue;
       }
 
@@ -5671,8 +5733,8 @@ function renderCal(){
           kc.innerHTML=`<span class="kyo-tag">${kyoTag}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(kyoLabel)}</span>`;
           kc.onclick=e=>{e.stopPropagation();openDetail(c.id, cell.ds);};
           cell.el.appendChild(kc);
-        } else if(weekRowKyo[cell.week+':'+row] && cellMaxBandRow[idx]>row){
-          // 同じ週・同じ段に協ラベルの日があり、このセルを下段の帯が通る → 無い日も高さを揃える（v.93→v.94で条件を絞る）
+        } else if(needKyo[idx] && needKyo[idx].has(row)){
+          // 同じ帯セグメントの並びに協ラベルの日があり、この段より下を帯が通る → 無い日も高さを揃える（v.107）
           cell.el.appendChild(_kyoSpacer());
         }
       }
