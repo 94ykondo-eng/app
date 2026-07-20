@@ -1787,7 +1787,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.113';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.115';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1798,6 +1798,33 @@ const getMember = id => { const sid=String(id||''); return sid ? MEMBERS.find(m=
 // 複数担当者ヘルパー
 function getAssignees(c){ if(Array.isArray(c.assignees)&&c.assignees.filter(Boolean).length) return c.assignees.filter(Boolean); return c.assignee?[c.assignee]:[]; }
 function primaryAssignee(c){ return getAssignees(c)[0]||''; }
+// v.114: メンバー削除時の担当クリーンアップ関連
+//   案件の担当(assignees/assignee)から削除IDを取り除く。主担当が削除IDなら残った担当の先頭へ繰り上げ(P1)。
+//   戻り値: { changed:[変更のあった案件...], emptied:[担当が空になった案件...] }
+function cleanupCasesForDeletedMember(delId){
+  const D=String(delId); const changed=[], emptied=[];
+  cases.forEach(c=>{
+    const before=getAssignees(c).map(String);
+    if(!before.includes(D)) return;             // 無関係な案件は触らない
+    const after=before.filter(id=>id!==D);
+    c.assignees=after;
+    if(String(c.assignee)===D || !after.includes(String(c.assignee))) c.assignee=after[0]||''; // 主担当繰り上げ
+    changed.push(c);
+    if(after.length===0) emptied.push(c);
+  });
+  return {changed, emptied};
+}
+// 削除前の影響プレビュー（データは変更しない）。担当が空になる件数・変更件数を返す。
+function previewDeletedMemberImpact(delId){
+  const D=String(delId); let changedCount=0, emptyCount=0;
+  cases.forEach(c=>{
+    const before=getAssignees(c).map(String);
+    if(!before.includes(D)) return;
+    changedCount++;
+    if(before.filter(id=>id!==D).length===0) emptyCount++;
+  });
+  return {changedCount, emptyCount};
+}
 function caseBarBg(c, alpha){
   // alpha: 16進アルファ（省略時は従来どおり '33'=20%）。複数日帯は継続セルが淡くて空欄に見えるため
   //        v.109 で renderBandOverlay からは '59'(=35%) を渡して少し濃くする。単日バーは '33' のまま。
@@ -4667,8 +4694,17 @@ function _buildMemberCard(m){
       const delBtn=document.createElement('button'); delBtn.className='btn-delete'; delBtn.textContent='削除';
       delBtn.addEventListener('click',async()=>{
         if(m.role==='admin'&&MEMBERS.filter(x=>x.role==='admin').length<=1){ alert('最後の管理者は削除できません'); return; }
-        const ok=await showConfirm(`「${m.name}」を削除しますか？`,'削除する');
+        // v.114: 削除で担当が空になる案件数を事前に算出し、確認ダイアログに表示（P2・データは残す）
+        const _imp=previewDeletedMemberImpact(m.id);
+        let _msg=`「${m.name}」を削除しますか？`;
+        if(_imp.emptyCount>0){
+          _msg+=`<br><span style="font-size:12px;color:#B45309;display:inline-block;margin-top:6px;line-height:1.6">⚠️ この削除で担当がいなくなる案件が ${_imp.emptyCount} 件あります（カレンダーに表示されなくなります）。案件自体は残るので、必要なら後で担当を割り当て直せます。</span>`;
+        }
+        const ok=await showConfirm(_msg,'削除する');
         if(!ok) return;
+        // v.114: 全案件の担当から削除IDを除去（主担当は繰り上げ）。変更のあった案件だけGASへ保存
+        const _res=cleanupCasesForDeletedMember(m.id);
+        _res.changed.forEach(c=>{ try{ saveCase_GAS(c); }catch(e){} });
         MEMBERS=MEMBERS.filter(x=>x.id!==m.id);
         gasPost({action:'deleteMember',id:m.id});
         saveCacheLS(); buildMemberFilters(); renderMembers(); renderCal();
@@ -6766,6 +6802,8 @@ function pfSaveCase(){
   if(!c){ console.error('[pfSaveCase] case not found: panelCaseId=', panelCaseId); return; }
   const name=document.getElementById('ap-name').value.trim();
   if(!name){alert('案件名を入力してください');return;}
+  // v.115: 担当者必須（新規・編集とも）。未選択なら保存をブロック（幽霊案件＝担当空の発生を入口で防ぐ）
+  if(collectAssignees().length===0){ alert('⚠️ 担当者を選択してください'); return; }
   CASE_FORM_DIRTY = false;   // 保存するので未保存状態を解除
 
   c.name     =name;
