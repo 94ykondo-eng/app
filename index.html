@@ -1787,7 +1787,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.118';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.119';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3186,8 +3186,8 @@ async function loadFromGAS(){
           }
         }
       }catch(e){ console.warn('日報バックグラウンド同期スキップ'); } })();
-      // カレンダー（案件）・日報・月間目標を同時に同期し、すべて完了してから同期中表示を解除
-      try{ await Promise.all([_syncCases, _syncReports, loadMonthGoal(), loadMemos()]); }
+      // カレンダー（案件）・日報・月間目標・写真を同時に同期し、すべて完了してから同期中表示を解除
+      try{ await Promise.all([_syncCases, _syncReports, loadMonthGoal(), loadMemos(), refreshPhotosFromGAS(true)]); }
       finally{ endSync(); }
     })();
     return;
@@ -3879,6 +3879,34 @@ function showSetupError(msg){
 }
 
 // ===== 写真管理 =====
+
+// v.119: 写真だけをGASから取り直して反映（他端末で追加された写真を早く見せる）。
+//   A: 案件詳細を開いたとき、B: 通常起動同期 から呼ぶ。連打防止に10秒スロットル（force で無視）。
+let _lastPhotoSyncAt = 0;
+async function refreshPhotosFromGAS(force){
+  if(!currentUser) return;
+  const now = Date.now();
+  if(!force && now - _lastPhotoSyncAt < 10000) return;   // 10秒以内の連続取得は抑制
+  _lastPhotoSyncAt = now;
+  try{
+    const photosData = await gasGet('getPhotos');
+    if(!photosData || !Array.isArray(photosData)) return;
+    // pending（未送信のローカル仮データ）はGAS未到達分のみ残す（loadFromGAS/reloadFromGASと同ロジック）
+    const pendingLocal = CASE_PHOTOS.filter(p=>p.isPending);
+    CASE_PHOTOS = photosData.filter(p=>p.id&&p.caseId).map(p=>{
+      const localMatch = pendingLocal.find(lp=>
+        (lp.uploadedAt===String(p.uploadedAt) || lp.fileName===p.fileName) &&
+        String(lp.caseId)===String(p.caseId));
+      return { ...p, caseId:String(p.caseId), photoDate:p.photoDate || localMatch?.photoDate || '' };
+    });
+    const gasCaseIds = new Set(photosData.map(p=>String(p.caseId)));
+    const unsynced = pendingLocal.filter(p=>!gasCaseIds.has(String(p.caseId)));
+    if(unsynced.length>0) CASE_PHOTOS.push(...unsynced);
+    saveCacheLS();
+    if(panelCaseId) renderPhotoSection(panelCaseId);
+    if(typeof renderCal==='function') renderCal();   // カレンダーの添付インジケータも反映
+  }catch(e){ /* 同期失敗は黙って無視（次の機会に再取得） */ }
+}
 
 // 写真一覧を描画
 function renderPhotoSection(caseId){
@@ -6736,6 +6764,8 @@ function openDetail(id, date){
   if(photosSection) photosSection.style.display='block';
   const _pd = panelDate; // 現在の日付をキャプチャ
   setTimeout(()=>renderPhotoSection(id), 50);
+  // v.119 A: 案件を開いたら写真をGASから取り直して最新化（他端末で追加された写真を反映・10秒スロットル）
+  refreshPhotosFromGAS();
   // 資料セクション表示・描画
   const docsSection=document.getElementById('pf-docs-section');
   if(docsSection) docsSection.style.display='block';
