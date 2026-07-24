@@ -357,6 +357,9 @@
   .cal-wd{padding:8px 4px;text-align:center;font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:0.04em}
   .cal-wd.sun{color:#EF4444}.cal-wd.sat{color:#3B82F6}
   .cal-days{display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(6,minmax(0,1fr));flex:1;min-height:0;overflow:hidden;height:0;position:relative}
+  /* v.120: モバイル横スワイプ月移動のスライド演出（changeMonthAnimated が付与） */
+  .cal-days.cal-anim{transition:transform .22s ease, opacity .22s ease;will-change:transform,opacity}
+  @media (prefers-reduced-motion: reduce){ .cal-days.cal-anim{transition:none} }
   .cal-day{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:4px 0 2px;overflow:hidden;display:flex;flex-direction:column;min-height:0;position:relative}
   .cal-day:nth-child(7n){border-right:none}
   .cal-day.other-clickable{cursor:pointer}
@@ -1787,7 +1790,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.119';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.120';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2196,7 +2199,9 @@ function _dayHasHiddenCases(ds){
   const more=cell&&cell.querySelector('.more-events');
   return !!(more && more.style.display==='block');
 }
+let _calSwiped=false, _calAnimating=false, _calTouch=null; // v.120 スワイプ月移動の状態
 function handleDayTap(ds, t, fromTouch){
+  if(_calSwiped) return;                 // v.120 横スワイプ中のタップは無視（月移動と排他）
   // バー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
   // （.event-bar-spacer は段揃え用の見えない詰め物で独自ハンドラを持たないため、余白と同じく新規追加へ進める）
   if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.cal-memo'))) return;
@@ -5344,6 +5349,80 @@ function getVisibleStatuses(){
 
 function changeMonth(d){ currentMonth+=d; if(currentMonth>11){currentMonth=0;currentYear++;}else if(currentMonth<0){currentMonth=11;currentYear--;} renderCal(); }
 function goToday(){ const t=new Date(); currentYear=t.getFullYear(); currentMonth=t.getMonth(); renderCal(); }
+
+// ===== v.120: モバイル版のみ カレンダー横スワイプで前月/翌月（モーション付き） =====
+// 左スワイプ=翌月, 右スワイプ=前月。既存の handleDayTap（タップで日を開く）とは _calSwiped で排他。
+// 帯・メモ帯の上で始まったジェスチャは各自のドラッグを優先し、スワイプ対象外にする。
+function changeMonthAnimated(dir){            // dir:+1=翌月 / -1=前月
+  const grid=document.getElementById('cal-days');
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(!grid || reduce){ changeMonth(dir); return; }   // モーション無効端末は即時切替
+  if(_calAnimating) return;
+  _calAnimating=true;
+  const DUR=220;
+  const outX = dir>0 ? -100 : 100;           // 翌月は左へ出す / 前月は右へ出す
+  const inX  = dir>0 ?  100 : -100;          // 新しい月は反対側から入る
+  grid.classList.add('cal-anim');
+  grid.style.transform='translateX('+outX+'%)';
+  grid.style.opacity='0';
+  setTimeout(()=>{
+    changeMonth(dir);                        // #cal-days を新しい月で再構築（renderCal）
+    grid.classList.remove('cal-anim');       // 反対側へ瞬間移動（アニメ無し）
+    grid.style.transition='none';
+    grid.style.transform='translateX('+inX+'%)';
+    grid.style.opacity='0';
+    void grid.offsetWidth;                   // reflow を強制
+    grid.style.transition='';
+    grid.classList.add('cal-anim');
+    grid.style.transform='translateX(0)';    // 中央へスライドイン
+    grid.style.opacity='1';
+    setTimeout(()=>{                          // 後始末（インラインstyleを除去して通常状態へ）
+      grid.classList.remove('cal-anim');
+      grid.style.transform=''; grid.style.opacity=''; grid.style.transition='';
+      _calAnimating=false;
+    }, DUR+40);
+  }, DUR);
+}
+function _initCalSwipe(){
+  const grid=document.getElementById('cal-days');
+  if(!grid || grid._swipeInit) return;
+  grid._swipeInit=true;
+  grid.addEventListener('touchstart', e=>{
+    if(e.touches.length!==1 || !IS_MOBILE()){ _calTouch=null; return; }  // モバイル版のみ・単一指
+    const tg=e.target;
+    const onBar = tg && tg.closest && (tg.closest('.event-bar')||tg.closest('.band-overlay-bar')||tg.closest('.cal-memo'));
+    const t=e.touches[0];
+    _calTouch={ x:t.clientX, y:t.clientY, skip:!!onBar, decided:false, horiz:false };
+  }, {passive:true});
+  grid.addEventListener('touchmove', e=>{
+    if(!_calTouch || _calTouch.skip || e.touches.length!==1) return;
+    const t=e.touches[0];
+    const dx=t.clientX-_calTouch.x, dy=t.clientY-_calTouch.y;
+    if(!_calTouch.decided && (Math.abs(dx)>10 || Math.abs(dy)>10)){
+      _calTouch.decided=true;
+      _calTouch.horiz = Math.abs(dx) > Math.abs(dy)*1.3;   // 横成分が優勢なら横スワイプと判定
+    }
+    if(_calTouch.decided && _calTouch.horiz){
+      _calSwiped=true;                                     // 以降のタップ(handleDayTap)を抑止
+      if(e.cancelable) e.preventDefault();                 // 横スワイプ中は縦スクロールを抑止
+    }
+  }, {passive:false});
+  grid.addEventListener('touchend', e=>{
+    const tc=_calTouch; _calTouch=null;
+    if(tc && !tc.skip){
+      const t=(e.changedTouches&&e.changedTouches[0]);
+      if(t){
+        const dx=t.clientX-tc.x, dy=t.clientY-tc.y;
+        if(Math.abs(dx)>60 && Math.abs(dx) > Math.abs(dy)*1.3){
+          changeMonthAnimated(dx<0 ? 1 : -1);              // 左スワイプ=翌月 / 右スワイプ=前月
+        }
+      }
+    }
+    setTimeout(()=>{ _calSwiped=false; }, 0);              // このタッチのタップ処理が終わった直後に解除
+  }, {passive:true});
+  grid.addEventListener('touchcancel', ()=>{ _calTouch=null; setTimeout(()=>{ _calSwiped=false; },0); }, {passive:true});
+}
+_initCalSwipe();
 
 // ===== 天気予報（愛知県固定・気象庁API） =====
 let WEATHER = {};                       // 'YYYY-MM-DD' → {code,pop,tmax,tmin}
