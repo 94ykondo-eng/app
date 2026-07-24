@@ -1143,6 +1143,7 @@
       <button class="view-btn" id="members-tab" onclick="switchView('members',this)" style="display:none">メンバー管理</button>
       <button class="view-btn" id="billing-tab" onclick="switchView('billing',this)" style="display:none">請求書発行</button>
       <button class="view-btn" id="order-tab" onclick="switchView('order',this)" style="display:none">注文書発行</button>
+      <button class="view-btn" id="log-tab" onclick="switchView('log',this)" style="display:none">ログ</button>
     </div>
     <div class="topbar-spacer"></div>
     <!-- 検索バー -->
@@ -1490,6 +1491,23 @@
       <div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">出力列：協力業者名・日付・案件名・支払金額(税抜)・消費税(10%)・税込金額 ／ 協力業者ごと・日付昇順 ／ UTF-8(BOM付)</div>
     </div>
 
+    <!-- ログ（監査ログ・管理者のみ） -->
+    <div class="members-panel" id="log-view" style="display:none">
+      <div class="members-header">
+        <div class="members-title">ログ</div>
+        <button class="add-member-btn" style="margin:0" onclick="logExportCSV()">⬇ CSVを出力</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">このアプリのすべての変更（案件・メンバー・メモ・日報・写真・資料・手当ほか）とログイン/ログアウトを記録します（最新1万件保持・読み取り専用・管理者のみ）。</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+        <input id="log-search" oninput="renderLogList()" placeholder="🔍 ユーザー・種別・対象で絞り込み" style="flex:1;min-width:180px;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+        <button class="pf-btn" onclick="renderLog()">↻ 更新</button>
+      </div>
+      <div id="log-list" style="font-size:13px"></div>
+      <div id="log-more-wrap" style="text-align:center;margin-top:12px;display:none">
+        <button class="pf-btn" onclick="logShowMore()">もっと見る</button>
+      </div>
+    </div>
+
     <!-- 勤怠 -->
     <div class="members-panel" id="kintai-view" style="display:none">
       <div class="members-header">
@@ -1811,7 +1829,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.124';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.125';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2035,6 +2053,7 @@ function startApp(){
   document.getElementById('members-tab').style.display = isAdminView()?'inline-block':'none';
   const _bt=document.getElementById('billing-tab'); if(_bt) _bt.style.display = isAdminView()?'inline-block':'none';
   const _ot=document.getElementById('order-tab'); if(_ot) _ot.style.display = isAdminView()?'inline-block':'none';
+  const _lt=document.getElementById('log-tab'); if(_lt) _lt.style.display = isAdminView()?'inline-block':'none';
   const _ct=document.getElementById('cabinet-tab'); if(_ct) _ct.style.display = (isAdminView()||getMember(currentUser)?.canCabinet)?'inline-block':'none';
   const _rt=document.getElementById('report-tab'); if(_rt) _rt.style.display = isAdminView()?'none':'inline-block';
   const _sb=document.getElementById('sync-btn'); if(_sb) _sb.style.display='inline-block';
@@ -7134,6 +7153,7 @@ function switchView(v,btn){
   document.getElementById('members-view').style.display=v==='members'?'block':'none';
   document.getElementById('billing-view').style.display=v==='billing'?'block':'none';
   document.getElementById('order-view').style.display=v==='order'?'block':'none';
+  const _lv=document.getElementById('log-view'); if(_lv) _lv.style.display=v==='log'?'block':'none';
   const _cab=document.getElementById('cabinet-view'); if(_cab) _cab.style.display=v==='cabinet'?'block':'none';
   const _kin=document.getElementById('kintai-view'); if(_kin) _kin.style.display=v==='kintai'?'block':'none';
   if(v==='daily'){ renderMiniCal(); renderDaily(); }
@@ -7141,6 +7161,7 @@ function switchView(v,btn){
   if(v==='members'){ renderMembers(); if(isAdmin()) renderStampManager(); }
   if(v==='billing'){ renderBilling(); }
   if(v==='order'){ renderOrder(); }
+  if(v==='log'){ renderLog(); }
   if(v==='cabinet'){ renderCabinet(); }
   if(v==='kintai'){ renderKintai(); kintaiLoadAllowances(); }
   if(v==='calendar'){
@@ -7148,6 +7169,59 @@ function switchView(v,btn){
     buildMemberFilters(); // メンバー変更を反映
     renderCal();          // 予定を再描画
   }
+}
+
+// ===== ログ（監査ログ）: 管理者のみ。全書き込み＋ログイン/ログアウトを表示 =====
+let _logRows=[], _logShown=0;
+const _LOG_PAGE=100;
+function renderLog(){
+  const box=document.getElementById('log-list'); if(!box) return;
+  box.innerHTML='<div style="color:var(--text-muted);padding:12px 0">読み込み中...</div>';
+  const mw=document.getElementById('log-more-wrap'); if(mw) mw.style.display='none';
+  gasGet('getAuditLog').then(res=>{
+    if(!res || res.ok!==true){
+      box.innerHTML='<div style="color:var(--text-muted);padding:12px 0">'+((res&&res.error==='forbidden')?'閲覧権限がありません（管理者のみ）':'読み込みに失敗しました')+'</div>';
+      return;
+    }
+    _logRows=Array.isArray(res.rows)?res.rows:[];
+    _logShown=_LOG_PAGE;
+    renderLogList();
+  }).catch(()=>{ box.innerHTML='<div style="color:var(--text-muted);padding:12px 0">読み込みに失敗しました</div>'; });
+}
+function _logFiltered(){
+  const q=(document.getElementById('log-search')?.value||'').trim().toLowerCase();
+  if(!q) return _logRows;
+  return _logRows.filter(r=>((r.user||'')+' '+(r.summary||'')+' '+(r.action||'')+' '+(r.target||'')).toLowerCase().includes(q));
+}
+function renderLogList(){
+  const box=document.getElementById('log-list'); if(!box) return;
+  const rows=_logFiltered();
+  const mw=document.getElementById('log-more-wrap');
+  if(rows.length===0){ box.innerHTML='<div style="color:var(--text-muted);padding:12px 0">ログはありません</div>'; if(mw) mw.style.display='none'; return; }
+  const shown=Math.min(_logShown, rows.length);
+  let html='';
+  for(let i=0;i<shown;i++){
+    const r=rows[i];
+    html+='<div style="display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border)">'
+      +'<div style="flex-shrink:0;color:var(--text-muted);font-size:11px;white-space:nowrap;width:128px">'+escHtml(r.timestamp||'')+'</div>'
+      +'<div style="flex-shrink:0;font-weight:600;width:78px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(r.user||'')+'</div>'
+      +'<div style="flex:1;min-width:0;word-break:break-all">'+escHtml(r.summary||r.action||'')+'</div>'
+      +'</div>';
+  }
+  box.innerHTML=html;
+  if(mw) mw.style.display = shown<rows.length ? 'block' : 'none';
+}
+function logShowMore(){ _logShown+=_LOG_PAGE; renderLogList(); }
+function logExportCSV(){
+  const rows=_logFiltered();
+  const head=['日時','ユーザー','ロール','種別','対象','概要'];
+  const esc=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const lines=[head.map(esc).join(',')].concat(rows.map(r=>[r.timestamp,r.user,r.role,r.action,r.target,r.summary].map(esc).join(',')));
+  const csv='\ufeff'+lines.join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='log_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 // ===== LINE通知設定（各自オンオフ） =====
