@@ -595,7 +595,7 @@
   .settings-input:focus{border-color:var(--accent)}
   .settings-btn-row{display:flex;gap:8px}
   .settings-btn{border:1px solid var(--border);background:none;border-radius:var(--radius);padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;color:var(--text)}
-  .cal-mode-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cal-url-box{font-size:11px;word-break:break-all;background:var(--bg);padding:8px 10px;border-radius:6px;color:var(--text);border:1px solid var(--border)}
   .settings-btn:hover{background:var(--bg)}
   .settings-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
   .settings-btn.primary:hover{background:#1d4ed8}
@@ -775,6 +775,21 @@
   .drag-dialog-btn.move{background:#EEF3FD;color:var(--accent)}
   .drag-dialog-btn.move:hover{background:#DBEAFE}
   .drag-dialog-btn.copy{background:var(--success-light);color:var(--success)}
+  /* v.122: 顧客名候補エディタ */
+  #client-cand-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:10001;display:none;align-items:center;justify-content:center;padding:16px}
+  #client-cand-overlay.open{display:flex}
+  #client-cand-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.2);width:340px;max-width:92vw;max-height:70vh;display:flex;flex-direction:column;overflow:hidden}
+  .ccand-head{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;color:var(--text);padding:12px 14px;border-bottom:1px solid var(--border)}
+  .ccand-head button{background:none;border:none;font-size:20px;line-height:1;color:var(--text-muted);cursor:pointer;padding:0 4px}
+  .ccand-hint{font-size:11px;color:var(--text-muted);padding:8px 14px 0;line-height:1.5}
+  #client-cand-list{overflow-y:auto;padding:8px 14px 14px}
+  .ccand-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
+  .ccand-name{font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ccand-btn{flex-shrink:0;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer}
+  .ccand-btn.hide{background:#FEE2E2;color:#B91C1C}
+  .ccand-btn.restore{background:#EEF3FD;color:var(--accent)}
+  .ccand-sec{font-size:11px;color:var(--text-muted);margin-top:10px;padding:4px 0;font-weight:700}
+  .ccand-empty{font-size:12px;color:var(--text-muted);padding:10px 0}
   .drag-dialog-btn.copy:hover{background:#BBF7D0}
 
   /* 確認ダイアログ */
@@ -1277,10 +1292,12 @@
             </div>
             <div class="pf-row"><label class="pf-label">顧客名</label>
               <span class="pf-val" id="view-client" style="display:none"></span>
-              <input class="pf-input" id="ap-client" placeholder="山田商事">
+              <input class="pf-input" id="ap-client" placeholder="山田商事" list="ap-client-list" autocomplete="off">
+              <datalist id="ap-client-list"></datalist>
             </div>
             <div class="pf-row" id="ap-client-abbr-row"><label class="pf-label" style="font-size:10px;color:var(--text-muted)">└ 略称</label>
               <input class="pf-input" id="ap-client-abbr" placeholder="カレンダー表示用（例：山田）" style="font-size:12px">
+              <button type="button" id="ap-client-cand-btn" onclick="openClientCandEditor()" style="margin-top:4px;background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-align:left">顧客名の候補を編集</button>
             </div>
             <div class="pf-row"><label class="pf-label">連絡先</label>
               <span class="pf-val" id="view-contact" style="display:none"></span>
@@ -1718,22 +1735,26 @@
     </div>
 
     <div class="settings-section">
-      <div class="settings-section-title">📅 カレンダー連携（Apple Watch / iPhone）</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
-        下のURLを iPhone の「照会するカレンダーを追加」に登録すると、案件の日程が標準カレンダー→Apple Watch に表示されます（読み取り専用・数時間おきに自動更新）。個人別を選ぶと、そのメンバーが担当の案件だけになります。
+      <div class="settings-section-title">📅 カレンダー連携</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">
+        下のURLをカレンダーに登録すると案件の日程が表示されます（読み取り専用・数時間おきに自動更新）。<br>
+        Googleカレンダー：「他のカレンダー ＋ → URLで追加」に貼り付け。iPhone：「照会するカレンダーを追加」。
       </div>
-      <div style="display:flex;gap:6px;margin-bottom:10px">
-        <button type="button" class="settings-btn cal-mode-btn active" id="cal-mode-all" onclick="setCalMode('all')">全案件</button>
-        <button type="button" class="settings-btn cal-mode-btn" id="cal-mode-user" onclick="setCalMode('user')">個人別</button>
+
+      <div style="font-weight:700;font-size:12px;color:var(--text);margin-bottom:4px">管理用（全件）</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">すべての案件</div>
+      <div class="cal-url-box" id="cal-url-all">—</div>
+      <div class="settings-btn-row" style="margin-top:6px;margin-bottom:14px">
+        <button class="settings-btn primary" onclick="copyCalUrl('all')">URLをコピー</button>
+        <button class="settings-btn" onclick="subscribeCalUrl('all')">iPhoneで購読</button>
       </div>
-      <div id="cal-user-wrap" style="display:none;margin-bottom:10px">
-        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">対象メンバー</label>
-        <select class="settings-input" id="cal-user-select" style="margin-bottom:0" onchange="updateCalUrl()"></select>
-      </div>
-      <div style="font-size:11px;word-break:break-all;background:var(--bg);padding:8px 10px;border-radius:6px;color:var(--text);border:1px solid var(--border)" id="cal-url-display">—</div>
-      <div class="settings-btn-row" style="margin-top:8px">
-        <button class="settings-btn primary" onclick="copyCalUrl()">URLをコピー</button>
-        <button class="settings-btn" onclick="subscribeCalUrl()">iPhoneで購読</button>
+
+      <div style="font-weight:700;font-size:12px;color:var(--text);margin-bottom:4px">作業員用（全員）</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">現場スタッフ・協力業者が担当の案件だけ（全員分）</div>
+      <div class="cal-url-box" id="cal-url-work">—</div>
+      <div class="settings-btn-row" style="margin-top:6px">
+        <button class="settings-btn primary" onclick="copyCalUrl('work')">URLをコピー</button>
+        <button class="settings-btn" onclick="subscribeCalUrl('work')">iPhoneで購読</button>
       </div>
       <div class="settings-status" id="cal-copy-status"></div>
     </div>
@@ -1790,7 +1811,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.120';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.124';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4925,9 +4946,8 @@ function openSettings(){
   // ステータスリセット
   const st = document.getElementById('settings-status');
   if(st){ st.className='settings-status'; st.textContent=''; }
-  // カレンダー連携の初期化
-  populateCalUserSelect();
-  setCalMode('all');
+  // カレンダー連携の初期化（管理用/作業員用の両URLを表示）
+  updateCalUrl();
   modal.classList.add('open');
 }
 
@@ -4936,34 +4956,15 @@ function closeSettings(){
   if(modal) modal.classList.remove('open');
 }
 
-// ===== カレンダー連携（.ics購読URL）=====
-let _calMode='all';
-function setCalMode(mode){
-  _calMode = mode;
-  const ab=document.getElementById('cal-mode-all'); const ub=document.getElementById('cal-mode-user');
-  if(ab) ab.classList.toggle('active', mode==='all');
-  if(ub) ub.classList.toggle('active', mode==='user');
-  const w=document.getElementById('cal-user-wrap'); if(w) w.style.display = mode==='user'?'block':'none';
-  updateCalUrl();
-}
-function populateCalUserSelect(){
-  const sel=document.getElementById('cal-user-select'); if(!sel) return;
-  const list=MEMBERS.filter(m=>m.role!=='vendor');
-  sel.innerHTML=list.map(m=>`<option value="${escHtml(String(m.id||''))}">${escHtml(m.name||String(m.id||''))}</option>`).join('');
-  const meIdx=list.findIndex(m=>String(m.id)===String(currentUser));
-  if(meIdx>=0) sel.selectedIndex=meIdx;
-}
-function buildCalUrl(){
+// ===== カレンダー連携（.ics購読URL）: 管理用（全件）/ 作業員用（field+vendor 全員） =====
+function buildCalUrl(scope){
   let url = GAS_URL + '?action=ics&token=' + encodeURIComponent(APP_TOKEN);
-  if(_calMode==='user'){
-    const uid=document.getElementById('cal-user-select')?.value || '';
-    if(uid) url += '&user=' + encodeURIComponent(uid);
-  }
+  if(scope==='work') url += '&scope=work';   // 作業員（現場スタッフ＋協力業者）が担当の案件だけ
   return url;
 }
 function updateCalUrl(){
-  const el=document.getElementById('cal-url-display');
-  if(el) el.textContent = buildCalUrl();
+  const a=document.getElementById('cal-url-all');  if(a) a.textContent = buildCalUrl('all');
+  const w=document.getElementById('cal-url-work'); if(w) w.textContent = buildCalUrl('work');
 }
 function _calCopyDone(){
   const s2=document.getElementById('cal-copy-status');
@@ -4972,15 +4973,15 @@ function _calCopyDone(){
 function _fallbackCopy(text){
   try{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }catch(e){}
 }
-function copyCalUrl(){
-  const url=buildCalUrl();
+function copyCalUrl(scope){
+  const url=buildCalUrl(scope);
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(url).then(_calCopyDone).catch(()=>{ _fallbackCopy(url); _calCopyDone(); });
   } else { _fallbackCopy(url); _calCopyDone(); }
 }
-function subscribeCalUrl(){
+function subscribeCalUrl(scope){
   // webcal:// にするとiOSがカレンダー購読の確認画面を開く
-  const url=buildCalUrl().replace(/^https?:\/\//,'webcal://');
+  const url=buildCalUrl(scope).replace(/^https?:\/\//,'webcal://');
   window.location.href=url;
 }
 
@@ -5359,6 +5360,7 @@ function changeMonthAnimated(dir){            // dir:+1=翌月 / -1=前月
   if(!grid || reduce){ changeMonth(dir); return; }   // モーション無効端末は即時切替
   if(_calAnimating) return;
   _calAnimating=true;
+  setTimeout(()=>{ _calAnimating=false; }, 1500);   // 保険: 万一アニメ連鎖が途切れても復帰しスワイプを再有効化
   const DUR=220;
   const outX = dir>0 ? -100 : 100;           // 翌月は左へ出す / 前月は右へ出す
   const inX  = dir>0 ?  100 : -100;          // 新しい月は反対側から入る
@@ -5423,6 +5425,90 @@ function _initCalSwipe(){
   grid.addEventListener('touchcancel', ()=>{ _calTouch=null; setTimeout(()=>{ _calSwiped=false; },0); }, {passive:true});
 }
 _initCalSwipe();
+
+// ===== v.122: 間違えて入力した顧客名候補を「非表示リスト」で候補から消せるようにする（この端末のlocalStorage） =====
+const _CLIENT_HIDE_KEY='gemba_client_hide_v1';
+let _clientHide=(function(){ try{ const a=JSON.parse(localStorage.getItem(_CLIENT_HIDE_KEY)||'[]'); return new Set(Array.isArray(a)?a:[]); }catch(e){ return new Set(); } })();
+function _saveClientHide(){ try{ localStorage.setItem(_CLIENT_HIDE_KEY, JSON.stringify([..._clientHide])); }catch(e){} }
+
+// ===== v.121: 顧客名↔略称を記憶（既存案件から導出）。顧客名を入れると略称を自動補完＋候補表示 =====
+// 保存先は増やさない：案件(cases)が localStorage/GAS に永続化済みなので記憶も自動で残る。
+function _buildClientAbbrMap(){
+  const map={};
+  (Array.isArray(cases)?cases:[]).forEach(c=>{
+    const cl=(c.client||'').trim(), ab=(c.clientAbbr||'').trim();
+    if(cl && cl!=='未設定' && ab && !_clientHide.has(cl)) map[cl]=ab;   // 空でない略称を持つ案件を採用（後勝ち）・非表示は除外
+  });
+  return map;
+}
+function _refreshClientDatalist(){
+  const dl=document.getElementById('ap-client-list'); if(!dl) return;
+  const names=[...new Set((Array.isArray(cases)?cases:[])
+    .map(c=>(c.client||'').trim()).filter(cl=>cl && cl!=='未設定' && !_clientHide.has(cl)))].sort();
+  dl.innerHTML='';
+  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; dl.appendChild(o); });
+}
+function _autofillClientAbbr(){
+  if(_caseFormLoading) return;                  // フォーム流し込み中は誤補完しない
+  const ci=document.getElementById('ap-client'), ai=document.getElementById('ap-client-abbr');
+  if(!ci || !ai) return;
+  if(ai.value.trim()!=='') return;              // 略称欄が空のときだけ（手入力・既存値を尊重）
+  const cl=(ci.value||'').trim(); if(!cl) return;
+  const ab=_buildClientAbbrMap()[cl];
+  if(ab) ai.value=ab;                           // 既知の顧客名なら略称を自動補完
+}
+function _initClientMemory(){
+  const ci=document.getElementById('ap-client');
+  if(!ci || ci._memInit) return;
+  ci._memInit=true;
+  ci.addEventListener('focus', _refreshClientDatalist);   // 開くたびに最新の候補へ更新
+  ci.addEventListener('input', _autofillClientAbbr);      // 入力/候補選択で略称補完
+  ci.addEventListener('change', _autofillClientAbbr);
+  _refreshClientDatalist();
+}
+_initClientMemory();
+
+// v.122: 顧客名候補エディタ（✕で非表示／戻すで復活。この端末のみ・案件データは触らない）
+function _clientCandNames(){
+  return [...new Set((Array.isArray(cases)?cases:[]).map(c=>(c.client||'').trim())
+    .filter(cl=>cl && cl!=='未設定' && !_clientHide.has(cl)))].sort();
+}
+function hideClientCand(name){ _clientHide.add(name); _saveClientHide(); _refreshClientDatalist(); renderClientCandEditor(); }
+function restoreClientCand(name){ _clientHide.delete(name); _saveClientHide(); _refreshClientDatalist(); renderClientCandEditor(); }
+function renderClientCandEditor(){
+  const box=document.getElementById('client-cand-list'); if(!box) return;
+  box.innerHTML='';
+  const active=_clientCandNames();
+  const hidden=[..._clientHide].filter(Boolean).sort();
+  const mkRow=(name, label, cls, fn)=>{
+    const row=document.createElement('div'); row.className='ccand-row';
+    const sp=document.createElement('span'); sp.className='ccand-name'; sp.textContent=name;
+    const b=document.createElement('button'); b.type='button'; b.className='ccand-btn '+cls; b.textContent=label;
+    b.addEventListener('click', ()=>fn(name));
+    row.appendChild(sp); row.appendChild(b); return row;
+  };
+  if(active.length===0){ const e=document.createElement('div'); e.className='ccand-empty'; e.textContent='候補はありません'; box.appendChild(e); }
+  active.forEach(n=> box.appendChild(mkRow(n, '✕ 非表示', 'hide', hideClientCand)));
+  if(hidden.length){
+    const h=document.createElement('div'); h.className='ccand-sec'; h.textContent='非表示中'; box.appendChild(h);
+    hidden.forEach(n=> box.appendChild(mkRow(n, '戻す', 'restore', restoreClientCand)));
+  }
+}
+function openClientCandEditor(){
+  let ov=document.getElementById('client-cand-overlay');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='client-cand-overlay';
+    ov.innerHTML='<div id="client-cand-panel">'
+      +'<div class="ccand-head"><span>顧客名の候補を編集</span><button type="button" id="client-cand-close" aria-label="閉じる">\u00d7</button></div>'
+      +'<div class="ccand-hint">間違えて入力した顧客名は「✕ 非表示」で候補から消えます（この端末のみ・「戻す」で復活できます）。案件データは変更しません。</div>'
+      +'<div id="client-cand-list"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e=>{ if(e.target===ov) ov.classList.remove('open'); });
+    ov.querySelector('#client-cand-close').addEventListener('click', ()=> ov.classList.remove('open'));
+  }
+  renderClientCandEditor();
+  ov.classList.add('open');
+}
 
 // ===== 天気予報（愛知県固定・気象庁API） =====
 let WEATHER = {};                       // 'YYYY-MM-DD' → {code,pop,tmax,tmin}
