@@ -1497,9 +1497,9 @@
         <div class="members-title">ログ</div>
         <button class="add-member-btn" style="margin:0" onclick="logExportCSV()">⬇ CSVを出力</button>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">このアプリのすべての変更（案件・メンバー・メモ・日報・写真・資料・手当ほか）とログイン/ログアウトを記録します（最新1万件保持・読み取り専用・管理者のみ）。</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">「誰が・何時に・どの案件を・どうしたか」を日付ごとに記録します（最新1万件保持・読み取り専用・管理者のみ）。<br>編集では変更した項目が並び、項目ごとの「詳細」ボタンで変更前/変更後を確認できます。移動・コピーは移動先/コピー先も記録します。</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
-        <input id="log-search" oninput="renderLogList()" placeholder="🔍 ユーザー・種別・対象で絞り込み" style="flex:1;min-width:180px;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+        <input id="log-search" oninput="renderLogList()" placeholder="🔍 ユーザー・案件名・操作・変更内容で絞り込み" style="flex:1;min-width:180px;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
         <button class="pf-btn" onclick="renderLog()">↻ 更新</button>
       </div>
       <div id="log-list" style="font-size:13px"></div>
@@ -1829,7 +1829,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.125';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.132';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2627,10 +2627,11 @@ function dragDialogAction(action){
     clearDropHint(); renderCal(); return;
   }
   if(action==='move'){
+    const _fs=c.start, _fe=c.end;                      // v.128: ログ用に移動前の期間を控える
     c.start=addDaysStr(c.start,delta);
     c.end=addDaysStr(c.end,delta);
     shiftCaseDateKeys(c,delta);          // v.106: 作業員・金額・備考のキーも同じ日数ずらす
-    saveCase_GAS(c);
+    saveCase_GAS(c, {op:'move', fromStart:_fs, fromEnd:_fe});
     logActivity('変更', c);
     saveCacheLS();
     renderCal();
@@ -2645,7 +2646,7 @@ function dragDialogAction(action){
     copy.comments=[];
     copy.photos=[...(c.photos||[])];
     cases.push(copy);
-    saveCase_GAS(copy);
+    saveCase_GAS(copy, {op:'copy', fromStart:c.start, fromEnd:c.end, srcName:c.name});
     logActivity('追加', copy);
     saveCacheLS();
     renderCal();
@@ -2737,10 +2738,11 @@ function caseMoveDialogAction(action){
   if(action==='move' && delta===0){ alert('移動先が現在と同じ日付です'); return; }
   closeCaseMoveDialog();
   if(action==='move'){
+    const _fs=c.start, _fe=c.end;                      // v.128: ログ用に移動前の期間を控える
     c.start=addDaysStr(c.start,delta);
     c.end=addDaysStr(c.end,delta);
     shiftCaseDateKeys(c,delta);          // v.106: 作業員・金額・備考のキーも同じ日数ずらす
-    saveCase_GAS(c);
+    saveCase_GAS(c, {op:'move', fromStart:_fs, fromEnd:_fe});
     logActivity('変更', c);
     saveCacheLS();
     renderCal();
@@ -2754,7 +2756,7 @@ function caseMoveDialogAction(action){
     copy.comments=[];
     copy.photos=[...(c.photos||[])];
     cases.push(copy);
-    saveCase_GAS(copy);
+    saveCase_GAS(copy, {op:'copy', fromStart:c.start, fromEnd:c.end, srcName:c.name});
     logActivity('追加', copy);
     saveCacheLS();
     renderCal();
@@ -3588,10 +3590,16 @@ function showLoadingOverlay(show){
 }
 
 // 案件保存（追加・更新）
-async function saveCase_GAS(c){
+// v.128: op に {op:'move'|'copy', fromStart, fromEnd, srcName} を渡すと、
+//        ログに「移動」「コピー」として記録される（省略時は通常の新規/編集）
+async function saveCase_GAS(c, op){
   pendingSaveIds.set(String(c.id), Date.now()); // 保存中として登録
   console.log('[debug] saveCase送信:', c.id, c.name, 'vendors=', JSON.stringify(c.vendors||[]));
-  await gasPost({ action:'saveCase', case:{
+  const _op = op && op.op ? {
+    op: String(op.op),
+    fromStart: String(op.fromStart||''), fromEnd: String(op.fromEnd||''), srcName: String(op.srcName||'')
+  } : {};
+  await gasPost({ action:'saveCase', ..._op, case:{
     id: String(c.id), name: c.name, client: c.client, clientAbbr: c.clientAbbr||'', contact: c.contact,
     address: c.address, start: c.start, end: c.end, assignee: c.assignee,
     assignees: JSON.stringify(c.assignees||[c.assignee||''].filter(Boolean)),
@@ -6321,23 +6329,30 @@ function updateBarColorPicker(selColor){
   const picks=document.getElementById('ap-barcolor-picks');
   if(!row||!picks) return;
   const ids=collectAssignees();
-  if(ids.length<=1){ row.style.display='none'; _barPickerOpen=false; return; }
+  // v.132: 担当者が2人以上なら従来どおり全員に表示。1人以下は管理者のときだけ表示する
+  const single=ids.length<=1;
+  if(single && !isAdmin()){ row.style.display='none'; _barPickerOpen=false; return; }
   if(selColor!==undefined) pfBarColor=selColor;
   const sel=pfBarColor;
   row.style.display='';
   const members=ids.map(id=>getMember(id)).filter(Boolean);
-  const pct=100/members.length;
+  const pct=100/(members.length||1);
   const gradStops=members.map((m,i)=>`${m.color} ${Math.round(i*pct)}%,${m.color} ${Math.round((i+1)*pct)}%`).join(',');
+  // 未指定のときに実際に使われる色（1人=その人の色／未割当=グレー／複数=グラデーション）
+  const autoBg = members.length===0 ? '#e5e7eb'
+               : members.length===1 ? members[0].color
+               : `linear-gradient(90deg,${gradStops})`;
+  const autoLabel = single ? '担当者の色（既定）' : 'グラデーション';
   // トリガーボタン（現在の色を表示）
   const thumb=sel
     ?`<div style="width:20px;height:20px;border-radius:50%;background:${sel};border:1px solid rgba(0,0,0,0.15);flex-shrink:0"></div>`
-    :`<div style="width:36px;height:20px;border-radius:3px;background:linear-gradient(90deg,${gradStops});border:1px solid rgba(0,0,0,0.15);flex-shrink:0"></div>`;
+    :`<div style="width:36px;height:20px;border-radius:3px;background:${autoBg};border:1px solid rgba(0,0,0,0.15);flex-shrink:0"></div>`;
   const trigger=`<div onclick="toggleBarColorPicker()" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:1px solid var(--border);border-radius:var(--radius);padding:3px 8px;background:var(--bg)">
     <span style="font-size:10px;color:var(--text-muted)">バーカラー</span>${thumb}
     <span style="font-size:9px;color:var(--text-muted)">${_barPickerOpen?'▲':'▼'}</span>
   </div>`;
   // カラーグリッド（プルダウン）
-  const gradOpt=`<div onclick="selectBarColor('')" title="グラデーション" style="width:36px;height:20px;border-radius:3px;cursor:pointer;background:linear-gradient(90deg,${gradStops});outline:2px solid ${sel===''?'#374151':'transparent'};outline-offset:1px"></div>`;
+  const gradOpt=`<div onclick="selectBarColor('')" title="${autoLabel}" style="width:36px;height:20px;border-radius:3px;cursor:pointer;background:${autoBg};outline:2px solid ${sel===''?'#374151':'transparent'};outline-offset:1px"></div>`;
   const palette=COLOR_PALETTE.map(c=>`<div onclick="selectBarColor('${c}')" style="width:20px;height:20px;border-radius:50%;cursor:pointer;background:${c};outline:2px solid ${sel===c?'#374151':'transparent'};outline-offset:1px"></div>`).join('');
   const grid=`<div style="display:${_barPickerOpen?'flex':'none'};flex-wrap:wrap;gap:5px;margin-top:6px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
     ${gradOpt}${palette}
@@ -7156,7 +7171,7 @@ function switchView(v,btn){
   const _lv=document.getElementById('log-view'); if(_lv) _lv.style.display=v==='log'?'block':'none';
   const _cab=document.getElementById('cabinet-view'); if(_cab) _cab.style.display=v==='cabinet'?'block':'none';
   const _kin=document.getElementById('kintai-view'); if(_kin) _kin.style.display=v==='kintai'?'block':'none';
-  if(v==='daily'){ renderMiniCal(); renderDaily(); }
+  if(v==='daily'){ renderMiniCal(); renderDaily(); _syncOnDaily(); }
   if(v==='report'){ renderReportMiniCal(); renderReportView(); }
   if(v==='members'){ renderMembers(); if(isAdmin()) renderStampManager(); }
   if(v==='billing'){ renderBilling(); }
@@ -7169,6 +7184,21 @@ function switchView(v,btn){
     buildMemberFilters(); // メンバー変更を反映
     renderCal();          // 予定を再描画
   }
+}
+
+// v.130: 日報タブを押すたびに最新を取り込む
+//  ・画面は先に描画し、取得は静かモード（ヘッダーの「同期中…」のみ・全画面オーバーレイなし）
+//  ・同期中・保存待ちのときは二重実行しない
+//  ・取得後の再描画は reloadFromGAS 末尾が担当（入力中は MG_FORM_DIRTY で保護）
+// v.131: 連打・タブ往復で GAS を叩きすぎないよう最小間隔を設ける
+//  ・`_lastAutoSyncAt` は手動🔄・復帰時自動同期・起動時と共有。直近に同期済みなら省略する
+//  ・短くすると鮮度優先、長くすると通信量優先。ここの数字だけ変えれば調整できる
+const _DAILY_SYNC_MIN_MS = 5000;   // 日報タブの最小同期間隔（5秒）
+function _syncOnDaily(){
+  if(!currentUser) return;
+  if(isReloading || pendingSyncs > 0 || pendingSaves > 0) return;
+  if(Date.now() - _lastAutoSyncAt < _DAILY_SYNC_MIN_MS) return;
+  reloadFromGAS(true);
 }
 
 // ===== ログ（監査ログ）: 管理者のみ。全書き込み＋ログイン/ログアウトを表示 =====
@@ -7188,10 +7218,133 @@ function renderLog(){
     renderLogList();
   }).catch(()=>{ box.innerHTML='<div style="color:var(--text-muted);padding:12px 0">読み込みに失敗しました</div>'; });
 }
+// v.126: summary は「種別：対象【詳細】」の形。表示用に3つへ分解する
+//   例）案件を保存：外壁塗装（山田商事）【状況 予定 → 完了／担当 田中 → 田中,佐藤】
+function _logParse(r){
+  const s=String((r&&r.summary)||'');
+  let head=s, detail='';
+  const m=s.match(/^([\s\S]*?)【([\s\S]*)】$/);
+  if(m){ head=m[1]; detail=m[2]; }
+  let kind=head, target='';
+  const i=head.indexOf('：');
+  if(i>=0){ kind=head.slice(0,i); target=head.slice(i+1); }
+  if(!target) target=String((r&&r.target)||'');
+  if(!kind) kind=String((r&&r.action)||'');
+  return {kind:kind, target:target, detail:detail};
+}
+const _LOG_ROLE_JA={admin:'管理者',keiri:'経理',field:'現場',vendor:'業者'};
+// 種別バッジの色（削除＝赤／ログイン系＝グレー／それ以外＝青）
+function _logKindColor(kind, action){
+  const a=String(action||'');
+  if(/^delete/.test(a)||/削除|初期化/.test(kind)) return ['var(--danger-light)','#991B1B'];
+  if(a==='login'||a==='logout'||a==='setupAdmin') return ['var(--bg)','var(--text-muted)'];
+  return ['#DBEAFE','#1E40AF'];
+}
+// v.127: 報告文の組み立て。action から「対象の種類」と「動詞」を決める
+const _LOG_ACT = {
+  saveCase:{n:'案件',v:'更新'},                        deleteCase:{n:'案件',v:'削除'},
+  saveMember:{n:'メンバー',v:'更新'},                  deleteMember:{n:'メンバー',v:'削除'},
+  saveMemo:{n:'メモ',v:'更新'},                        deleteMemo:{n:'メモ',v:'削除'},
+  saveReport:{n:'日報',v:'更新'},                      deleteReport:{n:'日報',v:'削除'},
+  uploadPhoto:{n:'写真',v:'追加'},                     deletePhoto:{n:'写真',v:'削除'},
+  uploadDoc:{n:'資料',v:'追加'}, saveDoc:{n:'資料',v:'更新'}, deleteDoc:{n:'資料',v:'削除'},
+  clearDocsSheet:{n:'資料シート',v:'初期化'},
+  setMonthGoal:{n:'月目標',v:'設定'},                  saveAllowance:{n:'手当',v:'更新'},
+  addComment:{n:'コメント',v:'追加'},
+  saveCabinetFolder:{n:'キャビネットのフォルダ',v:'更新'}, deleteCabinetFolder:{n:'キャビネットのフォルダ',v:'削除'},
+  saveCabinetFile:{n:'キャビネットのファイル',v:'更新'},   deleteCabinetFile:{n:'キャビネットのファイル',v:'削除'},
+  setLineNotify:{n:'LINE通知設定',v:'変更'},
+  saveStamp:{n:'スタンプ',v:'追加'}, deleteStamp:{n:'スタンプ',v:'削除'}, saveStamps:{n:'スタンプ',v:'更新'},
+  login:{n:'',v:'ログイン'}, logout:{n:'',v:'ログアウト'}, setupAdmin:{n:'初期管理者',v:'作成'}
+};
+const _LOG_WD=['日','月','火','水','木','金','土'];
+// "2026-07-26 09:00:00" → { ymd:'2026-07-26', label:'2026年7月26日(日)', hm:'09:00' }
+function _logWhen(ts){
+  const s=String(ts||'');
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if(!m) return {ymd:'', label:'', hm:s};
+  const y=+m[1], mo=+m[2], d=+m[3];
+  let wd=''; try{ wd=_LOG_WD[new Date(y,mo-1,d).getDay()]; }catch(e){}
+  return {ymd:m[1]+'-'+m[2]+'-'+m[3], label:y+'年'+mo+'月'+d+'日'+(wd?'('+wd+')':''), hm:m[4]+':'+m[5]};
+}
+// v.128: GAS が返す構造化 detail（{op, ch:[{n,a,b}], from, to, src}）
+function _logDetail(r){
+  const d=r&&r.detail;
+  if(!d||typeof d!=='object'||Array.isArray(d)) return null;
+  return {op:String(d.op||''), ch:Array.isArray(d.ch)?d.ch:[], from:String(d.from||''), to:String(d.to||''), src:String(d.src||''), note:String(d.note||'')};
+}
+// v.128: 変更のあった項目を「1項目=1詳細ボタン」の形に整える
+function _logItems(r){
+  const d=_logDetail(r), out=[];
+  if(d){
+    if(d.op==='move'){
+      out.push({n:'期間', s:'を移動', la:'移動前', a:d.from||'(不明)', lb:'移動後', b:d.to||''});
+      d.ch.forEach(x=>{ if(x&&x.k!=='start'&&x.k!=='end') out.push({n:String(x.n||x.k||''), s:'を変更', la:'変更前', a:String(x.a==null?'':x.a), lb:'変更後', b:String(x.b==null?'':x.b)}); });
+      return out;
+    }
+    if(d.op==='copy'){
+      out.push({n:'コピー元', s:'', la:'コピー元', a:(d.src?d.src+(d.from?'（'+d.from+'）':''):(d.from||'(不明)')), lb:'コピー先', b:d.to||''});
+      return out;
+    }
+    d.ch.forEach(x=>{ if(x) out.push({n:String(x.n||x.k||''), s:'を変更', la:'変更前', a:String(x.a==null?'':x.a), lb:'変更後', b:String(x.b==null?'':x.b)}); });
+    return out;
+  }
+  // 旧ログ（detail 列なし）: summary の【…】を項目に分解して同じ形にする
+  const legacy=_logParse(r).detail;
+  if(!legacy||legacy==='新規作成'||legacy==='変更なし') return out;
+  legacy.split('／').forEach(seg=>{
+    const m=String(seg).match(/^(.+?)\s(.*?)\s→\s(.*)$/);
+    if(m) out.push({n:m[1], s:'を変更', la:'変更前', a:m[2], lb:'変更後', b:m[3]});   // 「→」を含まない補足は文末に出すので項目にしない
+  });
+  return out;
+}
+// 1行分の報告文の材料を作る（誰が／何時に／何を／どこに／どうした）
+function _logSentence(r){
+  const p=_logParse(r);
+  const act=String((r&&r.action)||'');
+  const a=_LOG_ACT[act]||{n:'', v:(p.kind||act)};
+  const d=_logDetail(r);
+  let verb=a.v, note='', where='';
+  if(d && d.op==='new')       { verb='作成'; }
+  else if(d && d.op==='edit') { if(d.ch.length) verb='編集'; else { verb='保存'; note='（変更なし）'; } }
+  else if(d && d.op==='move') { verb='移動'; where=d.to; }
+  else if(d && d.op==='copy') { verb='コピー'; where=d.to; }
+  else if(d && d.op==='del')  { verb='削除'; }
+  else if(d && d.op==='')     { if(d.note) note='（'+d.note+'）'; }   // 差分を持たない種別の補足
+  else {                                     // 旧ログ（detail なし）は summary から推測
+    if(p.detail==='新規作成'){ verb='作成'; }
+    else if(p.detail==='変更なし'){ verb='保存'; note='（変更なし）'; }
+    else if(p.detail && p.detail.indexOf('→')<0){ note='（'+p.detail+'）'; }
+  }
+  return {
+    who:String((r&&r.user)||''), role:_LOG_ROLE_JA[String((r&&r.role)||'')]||String((r&&r.role)||''),
+    when:_logWhen(r&&r.timestamp), noun:a.n, target:p.target,
+    verb:verb, note:note, where:where, items:_logItems(r),
+    isDel:/^delete/.test(act)||verb==='削除'
+  };
+}
+// 報告文をプレーンテキストで返す（CSV・検索用）
+function _logText(r){
+  const s=_logSentence(r);
+  const who=s.who+(s.role?'（'+s.role+'）':'');
+  const what=s.target ? (s.noun?s.noun:'')+'「'+s.target+'」を' : (s.noun?s.noun+'を':'');
+  return who+'が '+s.when.hm+' に '+what+(s.where?' '+s.where+' に ':'')+s.verb+'しました'+s.note;
+}
+// 変更箇所（項目名）と変更内容を1行テキストに
+function _logItemsText(r){
+  const it=_logItems(r);
+  return {
+    where: it.map(x=>x.n).join('／'),
+    what:  it.map(x=>x.n+': '+x.a+' → '+x.b).join('／')
+  };
+}
 function _logFiltered(){
   const q=(document.getElementById('log-search')?.value||'').trim().toLowerCase();
   if(!q) return _logRows;
-  return _logRows.filter(r=>((r.user||'')+' '+(r.summary||'')+' '+(r.action||'')+' '+(r.target||'')).toLowerCase().includes(q));
+  return _logRows.filter(r=>{
+    const t=_logItemsText(r);
+    return (_logText(r)+' '+t.where+' '+t.what+' '+(r.summary||'')+' '+(r.action||'')+' '+(r.role||'')+' '+(r.timestamp||'')).toLowerCase().includes(q);
+  });
 }
 function renderLogList(){
   const box=document.getElementById('log-list'); if(!box) return;
@@ -7199,30 +7352,83 @@ function renderLogList(){
   const mw=document.getElementById('log-more-wrap');
   if(rows.length===0){ box.innerHTML='<div style="color:var(--text-muted);padding:12px 0">ログはありません</div>'; if(mw) mw.style.display='none'; return; }
   const shown=Math.min(_logShown, rows.length);
-  let html='';
+  let html='', lastYmd='';
   for(let i=0;i<shown;i++){
-    const r=rows[i];
-    html+='<div style="display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border)">'
-      +'<div style="flex-shrink:0;color:var(--text-muted);font-size:11px;white-space:nowrap;width:128px">'+escHtml(r.timestamp||'')+'</div>'
-      +'<div style="flex-shrink:0;font-weight:600;width:78px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(r.user||'')+'</div>'
-      +'<div style="flex:1;min-width:0;word-break:break-all">'+escHtml(r.summary||r.action||'')+'</div>'
+    const r=rows[i], s=_logSentence(r), col=_logKindColor(s.verb, r.action);
+    if(s.when.ymd!==lastYmd){                                  // 日付ごとの見出し
+      lastYmd=s.when.ymd;
+      html+='<div class="log-date" style="margin:14px 0 6px;font-size:12px;font-weight:700;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:4px">'+escHtml(s.when.label||'日付不明')+'</div>';
+    }
+    const who=escHtml(s.who)+(s.role?'<span style="font-size:10px;color:var(--text-muted);margin-left:2px">（'+escHtml(s.role)+'）</span>':'');
+    const what=s.target
+      ? (s.noun?escHtml(s.noun):'')+'<span style="font-weight:600">「'+escHtml(s.target)+'」</span>を'
+      : (s.noun?escHtml(s.noun)+'を':'');
+    html+='<div class="log-row" style="padding:8px 4px;line-height:1.8;border-bottom:1px solid var(--border)">'
+      +'<div>'
+        +'<span style="color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums;margin-right:6px">'+escHtml(s.when.hm)+'</span>'
+        +'<span style="font-weight:600">'+who+'</span>'
+        +'<span style="color:var(--text-muted)"> が </span>'
+        +what
+        +(s.where?'<span style="font-weight:600"> '+escHtml(s.where)+'</span><span style="color:var(--text-muted)"> に</span>':'')
+        +'<span style="color:'+col[1]+';font-weight:600"> '+escHtml(s.verb)+'しました</span>'
+        +(s.note?'<span style="color:var(--text-muted);font-size:12px">'+escHtml(s.note)+'</span>':'')
       +'</div>';
+    // v.128: 変更のあった項目を並べ、項目ごとに「詳細」ボタンを付ける
+    if(s.items.length){
+      html+='<div class="log-items" style="margin:2px 0 2px 46px">';
+      for(let j=0;j<s.items.length;j++){
+        const it=s.items[j];
+        html+='<div class="log-item" style="font-size:12px;line-height:1.9">'
+          +'<span style="color:var(--text-muted)">・</span>'
+          +'<span style="font-weight:600">'+escHtml(it.n)+'</span>'
+          +(it.s?'<span style="color:var(--text-muted)">'+escHtml(it.s)+'</span>':'')
+          +'<button type="button" class="log-ch-btn" onclick="logToggleCh('+i+','+j+')" id="log-chbtn-'+i+'-'+j+'" style="margin-left:6px;font-size:11px;padding:1px 8px;border:1px solid var(--border);border-radius:99px;background:var(--surface);color:var(--text-muted);cursor:pointer">詳細 ▸</button>'
+          +'<div class="log-ch" id="log-ch-'+i+'-'+j+'" style="display:none;margin:2px 0 6px 12px;padding:6px 10px;background:var(--bg);border-radius:6px;line-height:1.7;word-break:break-all">'
+            +'<div><span style="color:var(--text-muted);font-size:11px">'+escHtml(it.la||'変更前')+'：</span>'+escHtml(it.a===''?'(空)':it.a)+'</div>'
+            +'<div><span style="color:var(--text-muted);font-size:11px">'+escHtml(it.lb||'変更後')+'：</span>'+escHtml(it.b===''?'(空)':it.b)+'</div>'
+          +'</div>'
+        +'</div>';
+      }
+      html+='</div>';
+    }
+    html+='</div>';
   }
   box.innerHTML=html;
   if(mw) mw.style.display = shown<rows.length ? 'block' : 'none';
 }
+// 項目ごとの詳細の開閉
+function logToggleCh(i,j){
+  const d=document.getElementById('log-ch-'+i+'-'+j), b=document.getElementById('log-chbtn-'+i+'-'+j);
+  if(!d) return;
+  const open = d.style.display==='none';
+  d.style.display = open ? 'block' : 'none';
+  if(b) b.textContent = open ? '詳細 ▾' : '詳細 ▸';
+}
+// 行内の全項目をまとめて開閉
+function logToggleDetail(i){
+  const box=document.getElementById('log-list'); if(!box) return;
+  const list=box.querySelectorAll('[id^="log-ch-'+i+'-"]');
+  if(!list.length) return;
+  const open = list[0].style.display==='none';
+  for(let j=0;j<list.length;j++) logToggleCh(i,j);
+  return open;
+}
 function logShowMore(){ _logShown+=_LOG_PAGE; renderLogList(); }
 function logExportCSV(){
   const rows=_logFiltered();
-  const head=['日時','ユーザー','ロール','種別','対象','概要'];
+  const head=['日時','ユーザー','ロール','対象の種類','対象','操作','移動先/コピー先','変更箇所','変更内容','報告文'];
   const esc=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
-  const lines=[head.map(esc).join(',')].concat(rows.map(r=>[r.timestamp,r.user,r.role,r.action,r.target,r.summary].map(esc).join(',')));
+  const lines=[head.map(esc).join(',')].concat(rows.map(r=>{
+    const s=_logSentence(r), t=_logItemsText(r);
+    return [r.timestamp,r.user,s.role,s.noun,s.target,s.verb+s.note,s.where,t.where,t.what,_logText(r)].map(esc).join(',');
+  }));
   const csv='\ufeff'+lines.join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download='log_'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
+
 
 // ===== LINE通知設定（各自オンオフ） =====
 function openLineSettings(){
