@@ -218,6 +218,8 @@
   .mdp-kyo{font-size:11px;margin-top:2px;display:flex;align-items:center;gap:4px;min-width:0}
   .mdp-kyo-tag{font-weight:700;color:#B45309;flex-shrink:0}
   .mdp-kyo-name{color:#155E75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mdp-move{border:1px solid var(--border);background:var(--surface);border-radius:8px;width:34px;height:30px;font-size:15px;line-height:1;color:var(--text-muted);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+  .mdp-move:active{filter:brightness(0.92)}
   .mdp-avatar{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
   .mdp-new{
     display:flex;align-items:center;justify-content:center;gap:6px;
@@ -843,9 +845,14 @@
     .view-toggle::-webkit-scrollbar{display:none}
     .view-btn{flex-shrink:0;padding:6px 12px;font-size:13px;white-space:nowrap}
     .topbar-spacer{display:none}
-    /* 検索バー：タブの邪魔にならないよう幅調整 */
-    .search-wrap{order:2;flex:1;min-width:120px}
-    .search-input{width:100%;min-width:0}
+    /* v.134: 検索バーは専用の行にする。
+       以前は order:2・flex:1 で1段目の残り幅に押し込まれ、ユーザー名やボタンが増えると
+       入力欄が見切れていた（同期中インジケータが出たときだけ折り返して全幅になっていた）。
+       flex-basis:100% で常に改行させ、同期中と同じ「1行まるごと検索」を既定にする。 */
+    .search-wrap{order:2;width:100%;flex:0 0 100%;min-width:0}
+    .search-input{width:100%;min-width:0;box-sizing:border-box}
+    .search-input:focus{width:100%}
+    .search-dropdown{width:100%;left:0;right:0}
     .topbar-user{order:1;gap:6px}
     .topbar-user #topbar-username{font-size:12px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .logout-btn{order:1;padding:4px 8px;font-size:11px}
@@ -1829,7 +1836,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.132';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.134';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2264,6 +2271,21 @@ function handleDayTap(ds, t, fromTouch){
   if(s) s.value=ds;
   if(en) en.value=ds;
   setTimeout(()=>{ const n=document.getElementById('ap-name'); if(n) n.focus(); },50);
+}
+// v.133: モバイルは案件バーをタップしても詳細を直接開かず、必ずその日の一覧を出してから選ばせる。
+//  ・帯（複数日）はタップした位置の日付を優先し、取れなければセグメント先頭の日付を使う
+//  ・PCは従来どおりその場で詳細を開く（適用範囲はモバイルのみ）
+function openCaseFromBar(caseId, ds, ev){
+  if(_caseTapSuppressed()) return;
+  if(!IS_MOBILE()){ openDetail(caseId, ds); return; }
+  let day=ds;
+  if(ev && typeof dateAtPoint==='function'){
+    const p=(ev.changedTouches&&ev.changedTouches[0])||(ev.touches&&ev.touches[0])||ev;
+    if(p && typeof p.clientX==='number'){ const d=dateAtPoint(p.clientX,p.clientY); if(d) day=d; }
+  }
+  const list=(typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=day&&day<=c.end);
+  if(list.length>=1){ showDayPopup(day, list); return; }
+  openDetail(caseId, day);          // 一覧が作れないときだけ従来どおり詳細へ
 }
 let _lastIsMobile=IS_MOBILE();
 function _reflowCalendar(){
@@ -5214,6 +5236,10 @@ function showDayPopup(ds, dayCases){
     // その日の協力会社（カレンダーの .cal-kyo と同じ内容）をポップアップにも表示（v.98）
     const _kyoLabel=caseVendorDayLabel(c, ds);
     const kyoStr=_kyoLabel?`<div class="mdp-kyo"><span class="mdp-kyo-tag">${_caseVendorDayTag(c, ds)}</span><span class="mdp-kyo-name">${escHtml(_kyoLabel)}</span></div>`:'';
+    // v.133: モバイルは長押しを廃止したので、移動/コピーはここから開く（管理者のみ）
+    const moveBtn=(IS_MOBILE()&&isAdmin())
+      ? `<button type="button" class="mdp-move" onclick="event.stopPropagation();closeDayPopup();openCaseMoveDialog('${c.id}')" title="移動 / コピー">⇄</button>`
+      : '';
     html+=`<div class="mdp-item" onclick="closeDayPopup();openDetail('${c.id}','${ds}')"
       style="background:${barBg};border-left:3px solid ${fg}">
       <div class="mdp-dot" style="background:${dotColor}"></div>
@@ -5223,6 +5249,7 @@ function showDayPopup(ds, dayCases){
         ${kyoStr}
       </div>
       ${avatar}
+      ${moveBtn}
     </div>`;
   });
 
@@ -5986,8 +6013,9 @@ function renderCal(){
           +`<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(c.clientAbbr||c.client&&c.client!=='未設定')?escHtml(c.clientAbbr||c.client)+' ':''}<span style="opacity:0.75">${c.name}</span></span>`;
       }
 
-      bar.onclick=e=>{e.stopPropagation(); if(_caseTapSuppressed()) return; openDetail(c.id, cell.ds);};
-      if(canDrag()){ attachEventDrag(bar, c.id); attachCaseLongPress(bar, c.id); }
+      bar.onclick=e=>{e.stopPropagation(); openCaseFromBar(c.id, cell.ds, e);};
+      // v.133: モバイルは長押しを廃止（移動/コピーは一覧ポップアップから選ぶ）。PCは従来どおり
+      if(canDrag()){ attachEventDrag(bar, c.id); if(!IS_MOBILE()) attachCaseLongPress(bar, c.id); }
       if(!isMulti) _attachIndicatorStrip(bar, c);   // 単日バーのみ（複数日はバンド側で付与）
       cell.el.appendChild(bar);
 
@@ -6001,7 +6029,7 @@ function renderCal(){
           kc.className='cal-kyo';
           kc.dataset.caseid=c.id;
           kc.innerHTML=`<span class="kyo-tag">${kyoTag}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(kyoLabel)}</span>`;
-          kc.onclick=e=>{e.stopPropagation();openDetail(c.id, cell.ds);};
+          kc.onclick=e=>{e.stopPropagation(); openCaseFromBar(c.id, cell.ds, e);};
           cell.el.appendChild(kc);
         } else if(needKyo[idx] && needKyo[idx].has(row)){
           // 同じ帯セグメントの並びに協ラベルの日があり、この段より下を帯が通る → 無い日も高さを揃える（v.107）
@@ -6218,8 +6246,8 @@ function renderBandOverlay(){
       } else {
         band.innerHTML='&nbsp;';
       }
-      band.onclick=e=>{e.stopPropagation(); if(_caseTapSuppressed()) return; openDetail(c.id,firstCell.ds);};
-      if(canDrag()){ attachEventDrag(band,c.id); attachCaseLongPress(band,c.id); }
+      band.onclick=e=>{e.stopPropagation(); openCaseFromBar(c.id, firstCell.ds, e);};
+      if(canDrag()){ attachEventDrag(band,c.id); if(!IS_MOBILE()) attachCaseLongPress(band,c.id); }
       _attachIndicatorStrip(band, c);   // 複数日バンド帯（各週セグメントに付与）
       grid.appendChild(band);
     });
