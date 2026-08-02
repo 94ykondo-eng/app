@@ -35,17 +35,14 @@
   try{ if(sessionStorage.getItem('gemba_manual_logout')==='1') token=''; }catch(e){}
   if(!token) return;
 
-  // キャッシュの有無で必要な取得だけに絞る（GASの実行回数を無駄に増やさない）
-  var hasCache = false;
-  try{
-    var c = sessionStorage.getItem('gemba_cases_v2') || localStorage.getItem('gemba_cases_v2');
-    hasCache = !!(c && JSON.parse(c).length > 0);
-  }catch(e){}
-  // キャッシュあり(通常起動): loadFromGAS のバックグラウンド同期が使う4本
-  // キャッシュなし(初回起動): 逐次だった6本すべて
-  var actions = hasCache
-    ? ['getCases','getReports','getMonthGoal','getMemos']
-    : ['getCases','getReports','getMonthGoal','getMemos','getMembers','getPhotos'];
+  // v.135: 起動時の取得を getBoot 1本にまとめる。
+  //  Apps Script は同一ユーザーの同時リクエストを直列に処理するため、複数本投げても
+  //  「起動オーバーヘッド × 本数」がそのまま待ち時間になっていた（実測15秒）。
+  //  1本にすればオーバーヘッドは1回分で済む。個々の中身は単体取得と同じものが返る。
+  var BOOT_KEYS = {
+    getCases:'cases', getReports:'reports', getMembers:'members', getPhotos:'photos',
+    getMemos:'memos', getMonthGoal:'monthGoal', getActivity:'activity', getStamps:'stamps'
+  };
 
   function jsonp(action){
     return new Promise(function(resolve){
@@ -66,8 +63,20 @@
     });
   }
 
+  // getBoot を1回だけ投げ、各アクションはその結果から切り出す
+  var t0 = Date.now();
+  var bootPromise = jsonp('getBoot').then(function(d){
+    try{ console.log('[boot] getBoot ' + (Date.now()-t0) + 'ms' + (d && d.errors ? ' 一部失敗:' + d.errors.join(',') : '')); }catch(e){}
+    return d;
+  });
   var store = {};
-  for(var i=0;i<actions.length;i++){ store[actions[i]] = jsonp(actions[i]); }
+  Object.keys(BOOT_KEYS).forEach(function(action){
+    store[action] = bootPromise.then(function(d){
+      if(!d || d.ok !== true) return null;                 // 失敗時は本体が個別に取り直す
+      var v = d[BOOT_KEYS[action]];
+      return (v === undefined) ? null : v;
+    });
+  });
 
   window.__boot = {
     at: Date.now(),
@@ -1836,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.134';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.135';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3256,8 +3265,10 @@ async function loadFromGAS(){
         }
       }catch(e){ console.warn('日報バックグラウンド同期スキップ'); } })();
       // カレンダー（案件）・日報・月間目標・写真を同時に同期し、すべて完了してから同期中表示を解除
-      try{ await Promise.all([_syncCases, _syncReports, loadMonthGoal(), loadMemos(), refreshPhotosFromGAS(true)]); }
-      finally{ endSync(); }
+      // v.135: getBoot 1本に同梱済みなので、ここを増やしても通信は増えない
+      const _t0 = Date.now();
+      try{ await Promise.all([_syncCases, _syncReports, loadMonthGoal(), loadMemos(), refreshPhotosFromGAS(true), loadStampsFromGAS()]); }
+      finally{ endSync(); console.log('[boot] 起動同期 完了 '+(Date.now()-_t0)+'ms'); }
     })();
     return;
   }
@@ -3700,7 +3711,7 @@ function unreadActivityCount(){
 // お知らせをGASから取得
 async function loadActivity(){
   try{
-    const data=await gasGet('getActivity');
+    const data=await bootGet('getActivity');          // v.135: 起動直後は getBoot の束から
     if(Array.isArray(data)){
       // 新しい順にソート
       window.ACTIVITY_LOG=data.map(a=>({...a})).sort((x,y)=>String(y.timestamp).localeCompare(String(x.timestamp)));
@@ -3964,7 +3975,7 @@ async function refreshPhotosFromGAS(force){
   if(!force && now - _lastPhotoSyncAt < 10000) return;   // 10秒以内の連続取得は抑制
   _lastPhotoSyncAt = now;
   try{
-    const photosData = await gasGet('getPhotos');
+    const photosData = await bootGet('getPhotos');   // v.135: 起動直後は getBoot の束から。2回目以降は gasGet
     if(!photosData || !Array.isArray(photosData)) return;
     // pending（未送信のローカル仮データ）はGAS未到達分のみ残す（loadFromGAS/reloadFromGASと同ロジック）
     const pendingLocal = CASE_PHOTOS.filter(p=>p.isPending);
@@ -9023,7 +9034,7 @@ function closeStampDropdown(uid){
 
 async function loadStampsFromGAS(){
   try{
-    const d = await gasGet('getStamps');
+    const d = await bootGet('getStamps');             // v.135: 起動直後は getBoot の束から
     if(d){
       if(Array.isArray(d.reactions)) STAMP_REACTIONS = d.reactions;
       if(Array.isArray(d.palette) && d.palette.length>0) STAMPS = d.palette;
