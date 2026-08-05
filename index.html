@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.142';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.143';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3063,6 +3063,39 @@ function hideBootLoadError(){
   if(el) el.style.display = 'none';
 }
 
+// v.143: 同期が続けて失敗したことを利用者に知らせる。
+//   従来は catch で握りつぶしてコンソールに warn を出すだけだったため、
+//   ある1台だけ同期が止まっていても誰も気づけず、古いキャッシュのまま使い続けてしまう。
+//   （4台中1台だけ案件が出てこない、という状態を数日放置する原因になった）
+//   2回続けて失敗したら画面に出す。1回成功したら消す。
+let _syncFailStreak = 0;
+const _SYNC_FAIL_LIMIT = 2;
+function noteSyncResult(ok){
+  if(ok){ _syncFailStreak = 0; hideSyncStaleWarning(); return; }
+  _syncFailStreak++;
+  console.warn('[sync] 取得に失敗しました（連続'+_syncFailStreak+'回）');
+  if(_syncFailStreak >= _SYNC_FAIL_LIMIT) showSyncStaleWarning(_syncFailStreak);
+}
+function showSyncStaleWarning(n){
+  let el = document.getElementById('sync-stale');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'sync-stale';
+    el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:10001;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+      + 'background:#FEF3C7;border-top:2px solid #F59E0B;color:#92400E;padding:12px 14px;font-size:13px;line-height:1.6';
+    el.innerHTML = '<span style="flex:1;min-width:180px"><b>最新の内容を取り込めていません。</b>'
+      + '<br><span style="font-size:11px">表示は手元に保存された内容です。他の人の変更が反映されていない可能性があります。</span></span>'
+      + '<button type="button" onclick="reloadFromGAS()" style="border:1px solid #92400E;background:#92400E;color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer">再取得</button>'
+      + '<button type="button" onclick="document.getElementById(\'sync-stale\').style.display=\'none\'" style="border:1px solid #92400E;background:transparent;color:#92400E;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">閉じる</button>';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+function hideSyncStaleWarning(){
+  const el = document.getElementById('sync-stale');
+  if(el) el.style.display = 'none';
+}
+
 // v.89: 起動プリフェッチ（<head>）の結果を優先して使う。
 //  ・window.__boot.take(action) は1回だけ結果を返す（2回目以降はnull）
 //  ・プリフェッチが無い／期限切れ／失敗(null)なら従来どおり gasGet で取り直す
@@ -3237,18 +3270,19 @@ function mergeDocs(gc, lc){
   return gc;
 }
 
-// v.142: 案件1件ぶんの競合解決。
-//   updatedAt（エポックms）が GAS側・ローカル側の両方にあれば「新しい方」を採用する。
-//   片方でも 0（＝v.141以前に保存されたまま一度も更新されていない行）のときは
-//   比較材料が無いので、従来どおりの動き（60秒ローカル優先＋空欄の復元）に戻す。
-//   全案件が一度保存されて updatedAt が埋まるまでの移行期に、
-//   データを失う経路を作らないための措置。
-//   戻り値: { winner:'gas'|'local', comparable:boolean }
-function pickNewerCase(gc, lc){
-  const gt = Number(gc && gc.updatedAt) || 0;
-  const lt = Number(lc && lc.updatedAt) || 0;
-  if(!gt || !lt) return { winner:'gas', comparable:false };
-  return { winner: (lt > gt ? 'local' : 'gas'), comparable:true };
+// v.143: 案件1件ぶんの競合解決。
+//   ★v.142 は updatedAt を「端末の時計」で打っていたため、時計がずれた端末では
+//     手元の古いコピーが常に勝ち、GASの内容を捨てて再送し続ける状態になった。
+//     （4台中1台だけ反映されない・リロードでは直らない、という症状）
+//   v.143 では GAS がサーバー時刻で打刻するようにしたので、
+//   ローカルの updatedAt が GAS より新しくなることは原理的に起こらない。
+//   よって比較はやめ、「GASに打刻があればGASが正」とする。
+//   自分の保存がまだ届いていない間の保護は pendingSaveIds の60秒窓だけが担う。
+//   （60秒窓は1台の中の経過時間なので、端末間の時計ズレの影響を受けない）
+//   戻り値: { authoritative:true }  … GASを正とする（空欄の復元をしない＝削除が伝わる）
+//           { authoritative:false } … 打刻なし。移行期として従来の安全策に戻す
+function gasRowIsAuthoritative(gc){
+  return { authoritative: (Number(gc && gc.updatedAt) || 0) > 0 };
 }
 function parseCases(data){
   return data.map(c=>({
@@ -3305,16 +3339,10 @@ async function loadFromGAS(){
           const now = Date.now();
           const recentlySaved = id => { const t=pendingSaveIds.get(String(id)); return t && (now-t)<60000; };
           const localById = new Map(cases.map(c=>[String(c.id), c]));
-          // GAS優先でマージ（v.142: updatedAt があれば新しい方を採用）
+          // GAS優先でマージ（v.143: GASに打刻があればGASが正）
           const merged = gasCases.map(gc=>{
             const lc = localById.get(String(gc.id));
-            const cmp = pickNewerCase(gc, lc);
-            if(cmp.comparable){
-              // ローカルの方が新しい＝保存がGASに届いていない可能性 → 再送して採用
-              if(cmp.winner === 'local'){ saveCase_GAS(lc); return mergeDocs(lc, gc); }
-              return mergeDocs(gc, lc);
-            }
-            // 移行期（updatedAt が揃うまで）は従来どおり60秒ローカル優先
+            // 直近60秒に自分が保存した案件だけローカル優先（時計に依存しない窓）
             if(recentlySaved(gc.id) && lc) return lc;
             // 資料は両方保持＋削除済みは除外（競合マージ）
             return mergeDocs(gc, lc);
@@ -3328,7 +3356,7 @@ async function loadFromGAS(){
           if(panelCaseId) renderDocSection(panelCaseId);
           console.log('[sync] バックグラウンドで案件を更新しました');
         }
-      }catch(e){ console.warn('バックグラウンド同期スキップ'); } })();
+      }catch(e){ noteSyncResult(false); console.warn('バックグラウンド同期スキップ'); } })();
       // 日報の同期（カレンダーと同時に並行実行）
       const _syncReports = (async()=>{ try{
         const localRptsBg = [...DAILY_REPORTS];
@@ -3584,6 +3612,7 @@ async function reloadFromGAS(quiet){
   try{
     // ===== 案件：マージ方式 =====
     const casesData = await gasGet('getCases');
+    noteSyncResult(!!(casesData && Array.isArray(casesData)));   // v.143: 取得できたか記録
     if(casesData && Array.isArray(casesData)){
       const gasCases  = parseCases(casesData);
       console.log('[debug] 同期: GAS案件vendors → ' + (gasCases.length? gasCases.map(c=>`${c.name||c.id}:${(c.vendors||[]).length}件`).join(' / ') : '案件なし'));
@@ -3595,18 +3624,18 @@ async function reloadFromGAS(quiet){
       const mergedGas = gasCases.map(gc=>{
         const id = String(gc.id);
         const lc = localById.get(id);
-        // v.142: updatedAt が両方にあるときは「新しい方」を採用する。
-        //   従来の「GAS側が空ならローカルから復元＋再送」は、
-        //   他端末での削除（協力会社を全部消す等）を全端末で巻き戻していた。
-        const cmp = pickNewerCase(gc, lc);
-        if(cmp.comparable){
-          if(cmp.winner === 'local'){
-            // ローカルの方が新しい＝保存がGASに届いていない可能性 → 再送して採用
+        // v.143: GASに打刻があればGASが正。ローカルの updatedAt とは比較しない。
+        //   自分の保存がまだ届いていない場合の保護は、下の60秒窓だけが担う。
+        const cmp = gasRowIsAuthoritative(gc);
+        if(cmp.authoritative){
+          // 直近60秒以内に自分が保存した案件だけはローカル優先＋再送
+          //   （GASへの反映が間に合っていない可能性があるため）
+          if(recentlySaved(gc.id) && lc){
             saveCase_GAS(lc);
             mergeDocs(lc, gc);
             return lc;
           }
-          // GASの方が新しい（同時刻含む）→ GAS優先。
+          // それ以外はGAS優先。
           //   空欄の復元はしない。しないことが「削除を他端末へ伝える」ということ。
           mergeDocs(gc, lc);
           return gc;
@@ -3726,6 +3755,7 @@ async function reloadFromGAS(quiet){
 
   } catch(e){
     // 例外発生時はバックアップから復元
+    noteSyncResult(false);   // v.143: 失敗として記録（続けば画面に出す）
     console.warn('[sync] エラー発生 → バックアップ復元:', e);
     cases        = localCasesBackup;
     DAILY_REPORTS = localRptsBackup;
@@ -3791,7 +3821,8 @@ function showLoadingOverlay(show){
 //        ログに「移動」「コピー」として記録される（省略時は通常の新規/編集）
 async function saveCase_GAS(c, op){
   pendingSaveIds.set(String(c.id), Date.now()); // 保存中として登録
-  c.updatedAt = Date.now();   // v.142: 競合解決の基準。手元の案件にも同じ値を残す
+  // v.143: ここで updatedAt を打たない。競合解決の基準はGASのサーバー時刻に一本化した。
+  //   端末の時計で打つと、時計がずれた端末の古いコピーが永久に勝ち続ける。
   console.log('[debug] saveCase送信:', c.id, c.name, 'vendors=', JSON.stringify(c.vendors||[]));
   const _op = op && op.op ? {
     op: String(op.op),
@@ -3806,8 +3837,8 @@ async function saveCase_GAS(c, op){
     notes: String(c.notes==null?'':c.notes),   // v.92: 請求書の備考（GAS側でJSON化して保存）
     vendors: c.vendors || [], expenses: c.expenses || [],
     docs: JSON.stringify(c.docs||[]),
-    deletedDocs: JSON.stringify(c.deletedDocs||[]),
-    updatedAt: c.updatedAt          // v.142: エポックms（数値）。ISO文字列にしないこと
+    deletedDocs: JSON.stringify(c.deletedDocs||[])
+    // v.143: updatedAt は送らない。GAS が受信時にサーバー時刻で打刻する。
   }});
 }
 
