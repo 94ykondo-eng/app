@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.138';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.139';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3004,6 +3004,40 @@ function _jsonp(extra, timeoutMs){
 function gasGet(action){
   return _jsonp(`action=${action}&session=${encodeURIComponent(SESSION_TOKEN||'')}`);
 }
+// v.139: 起動時の取得が1回失敗しただけで「案件が全部消えた」ように見えるのを防ぐ。
+//   モバイル回線ではJSONPの10秒タイムアウトを超えることが実際にある（通信の一時的な失敗）。
+//   失敗＝null なので、少し待って取り直す。2秒後・5秒後の計3回まで。
+async function gasGetRetry(action, tries){
+  const waits = [2000, 5000];
+  const n = tries || (waits.length + 1);
+  for(let i = 0; i < n; i++){
+    const d = await gasGet(action);
+    if(d !== null && d !== undefined && !(d && d.error)) return d;
+    if(i < n - 1){
+      console.warn('[retry] '+action+' 取得に失敗 → '+(waits[i]/1000)+'秒後に再試行 ('+(i+1)+'/'+(n-1)+')');
+      await new Promise(r=>setTimeout(r, waits[i]));
+    }
+  }
+  return null;
+}
+// 起動時の読み込みが結局だめだったとき、空のカレンダーを黙って見せない
+function showBootLoadError(){
+  const el = document.getElementById('boot-error');
+  if(el){ el.style.display = 'flex'; return; }
+  const d = document.createElement('div');
+  d.id = 'boot-error';
+  d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:10002;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+    + 'background:#FEF3C7;border-top:2px solid #F59E0B;color:#92400E;padding:12px 14px;font-size:13px;line-height:1.6';
+  d.innerHTML = '<span style="flex:1;min-width:180px">データを取得できませんでした。通信を確認して再読み込みしてください。'
+    + '<br><span style="font-size:11px">案件はサーバーに保存されています。消えてはいません。</span></span>'
+    + '<button type="button" onclick="location.reload()" style="border:1px solid #92400E;background:#92400E;color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer">再読み込み</button>'
+    + '<button type="button" onclick="document.getElementById(\'boot-error\').style.display=\'none\'" style="border:1px solid #92400E;background:transparent;color:#92400E;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">閉じる</button>';
+  document.body.appendChild(d);
+}
+function hideBootLoadError(){
+  const el = document.getElementById('boot-error');
+  if(el) el.style.display = 'none';
+}
 
 // v.89: 起動プリフェッチ（<head>）の結果を優先して使う。
 //  ・window.__boot.take(action) は1回だけ結果を返す（2回目以降はnull）
@@ -3018,7 +3052,7 @@ async function bootGet(action){
       console.warn('[boot] プリフェッチ不成立のため再取得: '+action);
     }
   }catch(e){ console.warn('[boot] プリフェッチ取得エラー: '+action); }
-  return gasGet(action);
+  return gasGetRetry(action);      // v.139: 一時的な失敗はここで吸収する
 }
 // ログイン: APP_TOKENゲート。成功で{ok,token,member}を返す
 // ランダムなnonce（32桁hex）
@@ -3294,14 +3328,18 @@ async function loadFromGAS(){
   // キャッシュなし（初回）→ GASから取得
   showLoadingOverlay(true);
   beginSync();
+  let _casesLoaded = false;      // v.139: 案件を取得できたか（できなければ利用者に伝える）
   try{
     const casesData = await bootGet('getCases');
-    if(casesData && Array.isArray(casesData) && casesData.length > 0){
-      const parsed = parseCases(casesData);
-      if(parsed.length > 0){
-        cases = parsed;
-        saveCacheLS();
-        console.log('GAS初回読込: '+cases.length+'件');
+    if(casesData && Array.isArray(casesData)){
+      _casesLoaded = true;                       // 空配列（案件0件）も「取得成功」
+      if(casesData.length > 0){
+        const parsed = parseCases(casesData);
+        if(parsed.length > 0){
+          cases = parsed;
+          saveCacheLS();
+          console.log('GAS初回読込: '+cases.length+'件');
+        }
       }
     }
     const localRptsBackupL = [...DAILY_REPORTS]; // バックアップをtry外相当の先頭に
@@ -3394,6 +3432,9 @@ async function loadFromGAS(){
     endSync();          // ★ここが無く「同期中…」が消えないままだった
   }
   showLoadingOverlay(false);
+  // v.139: 取得できなかったのに空のカレンダーを黙って見せない
+  //   （案件はサーバーにあるので「消えた」ように見えるだけ。再読み込みを促す）
+  if(!_casesLoaded && cases.length === 0) showBootLoadError(); else hideBootLoadError();
   // 管理者がいない場合は初期設定画面へ
   if(MEMBERS.length > 0 && !MEMBERS.some(m=>m.role==='admin')){
     currentUser = null;
@@ -3592,6 +3633,7 @@ async function reloadFromGAS(quiet){
     // どの経路を通っても必ず解除する（途中 return や例外で取り残さない）
     isReloading = false;
     endSync();
+    if(cases.length > 0) hideBootLoadError();   // v.139: 取れたら警告を引っ込める
   }
 
   if(!quiet) showLoadingOverlay(false);
