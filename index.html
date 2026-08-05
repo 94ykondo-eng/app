@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.141';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.142';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2325,12 +2325,31 @@ let isReloading=false; // GAS再取得中はドラッグ無効
 let pendingSaves=0; // 保存中のGAS通信数
 const pendingSaveIds=new Map(); // {id: timestamp} 保存中の案件・日報ID
 
+// v.142: 保存カウンタの番犬タイマー。
+//   endSave() を1回でも取りこぼすと pendingSaves が0に戻らず、
+//   _onForegroundSync() の `pendingSaves > 0` ガードに永久に引っかかって
+//   そのセッション中は復帰時の自動同期が一切走らなくなる（＝他端末の変更が入ってこない）。
+//   v.138 で pendingSyncs に入れたのと同じ形で、45秒を超えたら強制解除する。
+let _saveWatchdog=null;
+function _armSaveWatchdog(){
+  if(_saveWatchdog) clearTimeout(_saveWatchdog);
+  _saveWatchdog=setTimeout(()=>{
+    if(pendingSaves>0){
+      console.warn('[save] 45秒を超えたため保存表示を強制解除しました（pendingSaves='+pendingSaves+'）');
+      pendingSaves=0;
+      updateSaveIndicator();
+    }
+    _saveWatchdog=null;
+  }, 45000);
+}
 function beginSave(){
   pendingSaves++;
+  _armSaveWatchdog();
   updateSaveIndicator();
 }
 function endSave(){
   pendingSaves=Math.max(0,pendingSaves-1);
+  if(pendingSaves===0 && _saveWatchdog){ clearTimeout(_saveWatchdog); _saveWatchdog=null; }
   updateSaveIndicator();
 }
 let pendingSyncs=0; // 同期中（GASからの読込中）の通信数
@@ -3217,6 +3236,20 @@ function mergeDocs(gc, lc){
   gc.deletedDocs = [...deleted];
   return gc;
 }
+
+// v.142: 案件1件ぶんの競合解決。
+//   updatedAt（エポックms）が GAS側・ローカル側の両方にあれば「新しい方」を採用する。
+//   片方でも 0（＝v.141以前に保存されたまま一度も更新されていない行）のときは
+//   比較材料が無いので、従来どおりの動き（60秒ローカル優先＋空欄の復元）に戻す。
+//   全案件が一度保存されて updatedAt が埋まるまでの移行期に、
+//   データを失う経路を作らないための措置。
+//   戻り値: { winner:'gas'|'local', comparable:boolean }
+function pickNewerCase(gc, lc){
+  const gt = Number(gc && gc.updatedAt) || 0;
+  const lt = Number(lc && lc.updatedAt) || 0;
+  if(!gt || !lt) return { winner:'gas', comparable:false };
+  return { winner: (lt > gt ? 'local' : 'gas'), comparable:true };
+}
 function parseCases(data){
   return data.map(c=>({
     id:       (()=>{ const raw=c.id; if(!raw) return ''; const n=Number(raw); return (!isNaN(n)&&Math.abs(n)>1e10)?n.toFixed(0):String(raw); })(),
@@ -3242,6 +3275,9 @@ function parseCases(data){
     expenses: Array.isArray(c.expenses) ? c.expenses : (()=>{ try{ return c.expenses?JSON.parse(c.expenses):[]; }catch(e){ return []; } })(),
     docs: Array.isArray(c.docs) ? c.docs : (()=>{ try{ return c.docs?JSON.parse(c.docs):[]; }catch(e){ return []; } })(),
     deletedDocs: Array.isArray(c.deletedDocs) ? c.deletedDocs : (()=>{ try{ return c.deletedDocs?JSON.parse(c.deletedDocs):[]; }catch(e){ return []; } })(),
+    // v.142: 競合解決用の更新時刻（エポックms）。0 は「まだ一度も保存されていない＝比較不能」。
+    //   ★ホワイトリスト方式なので、ここに書かないとGASから来た値が落ちる。
+    updatedAt: Number(c.updatedAt)||0,
     comments:[]
   })).filter(c=>c.id&&c.name); // 空行を除外
 }
@@ -3269,9 +3305,16 @@ async function loadFromGAS(){
           const now = Date.now();
           const recentlySaved = id => { const t=pendingSaveIds.get(String(id)); return t && (now-t)<60000; };
           const localById = new Map(cases.map(c=>[String(c.id), c]));
-          // GAS優先でマージ（直近60秒に保存した案件のみローカル優先）
+          // GAS優先でマージ（v.142: updatedAt があれば新しい方を採用）
           const merged = gasCases.map(gc=>{
             const lc = localById.get(String(gc.id));
+            const cmp = pickNewerCase(gc, lc);
+            if(cmp.comparable){
+              // ローカルの方が新しい＝保存がGASに届いていない可能性 → 再送して採用
+              if(cmp.winner === 'local'){ saveCase_GAS(lc); return mergeDocs(lc, gc); }
+              return mergeDocs(gc, lc);
+            }
+            // 移行期（updatedAt が揃うまで）は従来どおり60秒ローカル優先
             if(recentlySaved(gc.id) && lc) return lc;
             // 資料は両方保持＋削除済みは除外（競合マージ）
             return mergeDocs(gc, lc);
@@ -3552,6 +3595,23 @@ async function reloadFromGAS(quiet){
       const mergedGas = gasCases.map(gc=>{
         const id = String(gc.id);
         const lc = localById.get(id);
+        // v.142: updatedAt が両方にあるときは「新しい方」を採用する。
+        //   従来の「GAS側が空ならローカルから復元＋再送」は、
+        //   他端末での削除（協力会社を全部消す等）を全端末で巻き戻していた。
+        const cmp = pickNewerCase(gc, lc);
+        if(cmp.comparable){
+          if(cmp.winner === 'local'){
+            // ローカルの方が新しい＝保存がGASに届いていない可能性 → 再送して採用
+            saveCase_GAS(lc);
+            mergeDocs(lc, gc);
+            return lc;
+          }
+          // GASの方が新しい（同時刻含む）→ GAS優先。
+          //   空欄の復元はしない。しないことが「削除を他端末へ伝える」ということ。
+          mergeDocs(gc, lc);
+          return gc;
+        }
+        // ===== ここから下は updatedAt が揃うまでの移行期の従来動作 =====
         // 直近60秒以内に保存した編集はローカル全体を優先（GAS未反映でも消えない）
         if(recentlySaved(gc.id) && lc){
           saveCase_GAS(lc); // 念のため再送して反映を確実に
@@ -3731,6 +3791,7 @@ function showLoadingOverlay(show){
 //        ログに「移動」「コピー」として記録される（省略時は通常の新規/編集）
 async function saveCase_GAS(c, op){
   pendingSaveIds.set(String(c.id), Date.now()); // 保存中として登録
+  c.updatedAt = Date.now();   // v.142: 競合解決の基準。手元の案件にも同じ値を残す
   console.log('[debug] saveCase送信:', c.id, c.name, 'vendors=', JSON.stringify(c.vendors||[]));
   const _op = op && op.op ? {
     op: String(op.op),
@@ -3745,7 +3806,8 @@ async function saveCase_GAS(c, op){
     notes: String(c.notes==null?'':c.notes),   // v.92: 請求書の備考（GAS側でJSON化して保存）
     vendors: c.vendors || [], expenses: c.expenses || [],
     docs: JSON.stringify(c.docs||[]),
-    deletedDocs: JSON.stringify(c.deletedDocs||[])
+    deletedDocs: JSON.stringify(c.deletedDocs||[]),
+    updatedAt: c.updatedAt          // v.142: エポックms（数値）。ISO文字列にしないこと
   }});
 }
 
