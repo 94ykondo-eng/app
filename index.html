@@ -1182,7 +1182,7 @@
       <span id="save-indicator-text">保存中…</span>
     </div>
     <button class="logout-btn" id="bell-btn" onclick="toggleActivityPanel()" style="display:none;position:relative" title="お知らせ">🔔<span id="bell-badge" style="display:none;position:absolute;top:0;right:0;background:#EF4444;color:#fff;font-size:9px;font-weight:700;border-radius:99px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;transform:translate(30%,-30%)">0</span></button>
-    <button class="logout-btn" id="sync-btn" onclick="reloadFromGAS()" style="display:none" title="スプレッドシートから最新データを取得">🔄 同期</button>
+    <button class="logout-btn" id="sync-btn" onclick="manualSync()" style="display:none" title="スプレッドシートから最新データを取得">🔄 同期</button>
     <button class="logout-btn" id="settings-btn" onclick="openSettings()" style="display:none" title="設定">⚙️</button>
     <button class="logout-btn" onclick="doLogout()">ログアウト</button>
   </div>
@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.143';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.144';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2073,6 +2073,7 @@ function startApp(){
   const _ct=document.getElementById('cabinet-tab'); if(_ct) _ct.style.display = (isAdminView()||getMember(currentUser)?.canCabinet)?'inline-block':'none';
   const _rt=document.getElementById('report-tab'); if(_rt) _rt.style.display = isAdminView()?'none':'inline-block';
   const _sb=document.getElementById('sync-btn'); if(_sb) _sb.style.display='inline-block';
+  startAutoSync();   // v.144: 定期同期を開始
   const _bell=document.getElementById('bell-btn'); if(_bell) _bell.style.display='inline-block';
   // お知らせを読み込んで未読チェック
   loadActivity().then(()=>{ setTimeout(checkActivityNotice, 1200); });
@@ -3070,11 +3071,37 @@ function hideBootLoadError(){
 //   2回続けて失敗したら画面に出す。1回成功したら消す。
 let _syncFailStreak = 0;
 const _SYNC_FAIL_LIMIT = 2;
+let _lastSyncOkAt = 0;              // v.144: 最後に取得できた時刻（エポックms）
 function noteSyncResult(ok){
-  if(ok){ _syncFailStreak = 0; hideSyncStaleWarning(); return; }
+  if(ok){
+    _syncFailStreak = 0; _lastSyncOkAt = Date.now();
+    hideSyncStaleWarning(); renderSyncStamp();
+    return;
+  }
   _syncFailStreak++;
+  renderSyncStamp();
   console.warn('[sync] 取得に失敗しました（連続'+_syncFailStreak+'回）');
   if(_syncFailStreak >= _SYNC_FAIL_LIMIT) showSyncStaleWarning(_syncFailStreak);
+}
+// v.144: 最終同期時刻をボタンに出す。古ければ一目で分かるようにする。
+//   （今回のように「1台だけ同期が止まっている」ことに誰も気づけない状態をなくす）
+function renderSyncStamp(){
+  const b = document.getElementById('sync-btn');
+  if(!b) return;
+  if(!_lastSyncOkAt){ b.textContent = '\ud83d\udd04 \u540c\u671f'; return; }
+  const d = new Date(_lastSyncOkAt);
+  const hhmm = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  const stale = (Date.now() - _lastSyncOkAt) > 10*60*1000;   // 10分以上前なら注意色
+  b.textContent = '\ud83d\udd04 ' + hhmm;
+  b.style.color = stale ? '#B45309' : '';
+  b.title = '\u6700\u7d42\u540c\u671f ' + hhmm + '\uff08\u62bc\u3059\u3068\u518d\u53d6\u5f97\uff09';
+}
+// v.144: 手動同期。結果をその場に出す（押しても何も起きない状態をなくす）
+async function manualSync(){
+  const before = _lastSyncOkAt;
+  await reloadFromGAS();
+  if(_lastSyncOkAt > before) showToast('\u2705 \u6700\u65b0\u3092\u53d6\u5f97\u3057\u307e\u3057\u305f\uff08\u6848\u4ef6' + cases.length + '\u4ef6\uff09');
+  else showToast('\u26a0\ufe0f \u53d6\u5f97\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002\u96fb\u6ce2\u72b6\u614b\u3092\u78ba\u8a8d\u3057\u3066\u3082\u3046\u4e00\u5ea6\u304a\u8a66\u3057\u304f\u3060\u3055\u3044');
 }
 function showSyncStaleWarning(n){
   let el = document.getElementById('sync-stale');
@@ -3111,6 +3138,38 @@ async function bootGet(action){
   }catch(e){ console.warn('[boot] プリフェッチ取得エラー: '+action); }
   return gasGetRetry(action);      // v.139: 一時的な失敗はここで吸収する
 }
+// v.144: 同期（🔄・復帰同期・定期同期）用の一括取得。
+//   ★従来この経路は gasGet を4回「直列」に await していた。
+//     ・gasGet はリトライ無し。JSONPは10秒で null を返すため、
+//       1回タイムアウトしただけで押しても何も起きずに終わっていた。
+//     ・Apps Script は同一利用者のリクエストを直列処理するので、
+//       4本の往復がそのまま待ち時間になり、失敗する確率も4倍だった。
+//   起動時と同じく getBoot で1本にまとめ、gasGetRetry で再試行も効かせる。
+//   戻り値: { ok:boolean, get(action) }  … 失敗時は get() が null を返す
+async function syncFetchAll(){
+  let boot = null;
+  try{ boot = await gasGetRetry('getBoot'); }catch(e){ boot = null; }
+  const KEYS = { getCases:'cases', getReports:'reports', getMembers:'members', getPhotos:'photos',
+                 getMemos:'memos', getMonthGoal:'monthGoal', getActivity:'activity', getStamps:'stamps' };
+  if(boot && boot.ok === true){
+    return {
+      ok:true, mode:'boot',
+      get(action){ const v = boot[KEYS[action]]; return (v === undefined) ? null : v; }
+    };
+  }
+  // getBoot が使えないときは個別取得に落とす。
+  //   直列に戻るぶん遅いが、「同期が丸ごと空振りする」よりはるかにまし。
+  //   ここも gasGetRetry なので、1回のタイムアウトでは失敗にならない。
+  const vals = {};
+  for(const a of ['getCases','getReports','getMembers','getPhotos']){
+    try{ vals[a] = await gasGetRetry(a); }catch(e){ vals[a] = null; }
+  }
+  return {
+    ok:false, mode:'each',
+    get(action){ return (action in vals) ? vals[action] : null; }
+  };
+}
+
 // ログイン: APP_TOKENゲート。成功で{ok,token,member}を返す
 // ランダムなnonce（32桁hex）
 // 1リクエスト完結のログイン。GASへの到達が断続的に失敗することがあるため、最大3回まで自動リトライする
@@ -3179,11 +3238,39 @@ function saveCacheLS(){
   const c=JSON.stringify(cases), m=JSON.stringify(MEMBERS), r=JSON.stringify(DAILY_REPORTS);
   const LS_R='gemba_reports_v1', LS_ST='gemba_stamps_v1', LS_SR='gemba_stamp_reactions_v1', LS_PH='gemba_photos_v1', LS_DC='gemba_docs_v1';
   const st=JSON.stringify(STAMPS), sr=JSON.stringify(STAMP_REACTIONS), ph=JSON.stringify(CASE_PHOTOS), dc=JSON.stringify(CASE_DOCS);
-  try{ localStorage.setItem(LS_CASES,c); localStorage.setItem(LS_MEMBERS,m); localStorage.setItem(LS_R,r); localStorage.setItem(LS_ST,st); localStorage.setItem(LS_SR,sr); localStorage.setItem(LS_PH,ph); localStorage.setItem(LS_DC,dc); }catch(e){}
-  try{ sessionStorage.setItem(LS_CASES,c); sessionStorage.setItem(LS_MEMBERS,m); sessionStorage.setItem(LS_R,r); sessionStorage.setItem(LS_ST,st); sessionStorage.setItem(LS_SR,sr); sessionStorage.setItem(LS_PH,ph); sessionStorage.setItem(LS_DC,dc); }catch(e){}
+  // v.144: 従来は7個の setItem を1つの try に入れていたため、
+  //   容量超過で1個溢れると「それ以降が全部スキップ」され、しかも握りつぶされていた。
+  //   写真・資料(base64)が肥大すると案件やメンバーまで保存されなくなる。
+  //   1個ずつ独立させ、案件・メンバーを最優先で書く。失敗は記録して警告する。
+  const _pairs = [[LS_CASES,c],[LS_MEMBERS,m],[LS_R,r],[LS_ST,st],[LS_SR,sr],[LS_PH,ph],[LS_DC,dc]];
+  const _failed = [];
+  _pairs.forEach(([k,v])=>{
+    try{ localStorage.setItem(k,v); }catch(e){ _failed.push(k); }
+    try{ sessionStorage.setItem(k,v); }catch(e){}
+  });
+  if(_failed.length){
+    console.warn('[cache] 保存できませんでした: ' + _failed.join(','));
+    // 案件かメンバーが保存できないと次回起動が古いままになるため、その時だけ知らせる
+    if(_failed.indexOf(LS_CASES)>=0 || _failed.indexOf(LS_MEMBERS)>=0) showCacheFullWarning();
+  }
   try{ const _al=JSON.stringify(ALLOWANCES); localStorage.setItem('gemba_allowances_v1',_al); sessionStorage.setItem('gemba_allowances_v1',_al); }catch(e){}
 }
 
+// v.144: 端末の保存容量が足りず、次回起動時に古い内容が出てしまう状態を知らせる
+function showCacheFullWarning(){
+  let el = document.getElementById('cache-full');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'cache-full';
+    el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:10002;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+      + 'background:#FEE2E2;border-top:2px solid #DC2626;color:#991B1B;padding:12px 14px;font-size:13px;line-height:1.6';
+    el.innerHTML = '<span style="flex:1;min-width:180px"><b>この端末の保存容量が不足しています。</b>'
+      + '<br><span style="font-size:11px">設定の「ローカルキャッシュを削除」を実行してください。</span></span>'
+      + '<button type="button" onclick="document.getElementById(\'cache-full\').style.display=\'none\'" style="border:1px solid #991B1B;background:transparent;color:#991B1B;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">閉じる</button>';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
 function loadCacheLS(){
   let c=null,m=null;
   let rp=null,st2=null,sr2=null,ph2=null,dc2=null; const LS_R2='gemba_reports_v1',LS_ST2='gemba_stamps_v1',LS_SR2='gemba_stamp_reactions_v1',LS_PH2='gemba_photos_v1',LS_DC2='gemba_docs_v1';
@@ -3598,6 +3685,36 @@ function _onForegroundSync(){
   reloadFromGAS(true); // 静かモード（全画面オーバーレイなし・ヘッダーの「同期中…」のみ）
 }
 document.addEventListener('visibilitychange', _onForegroundSync);
+// v.144: 定期同期。★これが無かったのが今回の本丸。
+//   同期のきっかけは「起動時」「復帰時」「手動」の3つだけで、setInterval が1つも無かった。
+//   アプリを開きっぱなしにしている端末は、他端末の変更を永久に受け取れなかった。
+//   ・画面が見えているときだけ実行（バックグラウンドではGASを叩かない）
+//   ・保存中・同期中はスキップ（次の周期で拾う）
+//   ・失敗が続いたら間隔を広げる（90秒 → 3分 → 10分）。回線が悪い現場で叩き続けない
+const _SYNC_BASE_MS = 90 * 1000;
+let _syncTimer = null;
+function _autoSyncIntervalMs(){
+  if(_syncFailStreak >= 4) return 10 * 60 * 1000;
+  if(_syncFailStreak >= 2) return 3 * 60 * 1000;
+  return _SYNC_BASE_MS;
+}
+async function _autoSyncTick(){
+  try{
+    if(!currentUser) return;
+    if(document.visibilityState !== 'visible') return;
+    if(isReloading || pendingSyncs > 0 || pendingSaves > 0) return;
+    if(Date.now() - _lastAutoSyncAt < _SYNC_BASE_MS - 5000) return;   // 復帰同期の直後は空振りさせる
+    await reloadFromGAS(true);   // 静かモード（オーバーレイなし）
+  }catch(e){ console.warn('[sync] 定期同期スキップ'); }
+  finally{ _scheduleAutoSync(); }
+}
+function _scheduleAutoSync(){
+  if(_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(_autoSyncTick, _autoSyncIntervalMs());
+}
+function startAutoSync(){ renderSyncStamp(); _scheduleAutoSync(); }
+function stopAutoSync(){ if(_syncTimer){ clearTimeout(_syncTimer); _syncTimer = null; } }
+
 
 async function reloadFromGAS(quiet){
   isReloading = true;
@@ -3610,8 +3727,10 @@ async function reloadFromGAS(quiet){
   const localRptsBackup   = [...DAILY_REPORTS];
 
   try{
+    // v.144: 4回の直列往復をやめ、getBoot 1本（リトライ付き）にまとめる
+    const _boot = await syncFetchAll();
     // ===== 案件：マージ方式 =====
-    const casesData = await gasGet('getCases');
+    const casesData = _boot.get('getCases');
     noteSyncResult(!!(casesData && Array.isArray(casesData)));   // v.143: 取得できたか記録
     if(casesData && Array.isArray(casesData)){
       const gasCases  = parseCases(casesData);
@@ -3675,7 +3794,7 @@ async function reloadFromGAS(quiet){
 
     loadStampsFromGAS();  // リアクション/絵文字を共有取得
     // ===== メンバー：GAS優先 =====
-    const membersData = await gasGet('getMembers');
+    const membersData = _boot.get('getMembers');
     if(membersData && Array.isArray(membersData) && membersData.length>0){
       MEMBERS = membersData.map(m=>({
         id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',role:m.role||'field',pw:'',
@@ -3688,7 +3807,7 @@ async function reloadFromGAS(quiet){
 
     // ===== 写真：GAS優先（他端末で追加された写真も同期で反映）=====
     // pending（未送信のローカル仮データ）はGAS未到達分のみ残す。loadFromGASと同ロジック。
-    const photosDataR = await gasGet('getPhotos');
+    const photosDataR = _boot.get('getPhotos');
     if(photosDataR && Array.isArray(photosDataR)){
       const pendingLocal = CASE_PHOTOS.filter(p=>p.isPending);
       CASE_PHOTOS = photosDataR.filter(p=>p.id&&p.caseId).map(p=>{
@@ -3706,7 +3825,7 @@ async function reloadFromGAS(quiet){
     }
 
     // ===== 日報：マージ方式 =====
-    const reportsData = await gasGet('getReports');
+    const reportsData = _boot.get('getReports');
     if(reportsData && Array.isArray(reportsData)){
       const gasReports = reportsData.map(r=>{
         // JSON.parseの例外を個別にキャッチ
@@ -4947,6 +5066,7 @@ function doLogout(){
     return;
   }
   currentUser=null;
+  stopAutoSync();   // v.144: 定期同期を止める
   // サーバー側のセッションを破棄してトークンを消す
   try{ if(SESSION_TOKEN) gasPost({ action:'logout' }); }catch(e){}
   SESSION_TOKEN='';
