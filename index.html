@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.140';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.141';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3321,10 +3321,45 @@ async function loadFromGAS(){
           }
         }
       }catch(e){ console.warn('日報バックグラウンド同期スキップ'); } })();
+      // v.141: メンバーの同期。
+      //   カレンダーは visibleCases → visibleMembers（= MEMBERS 由来）で絞り込むため、
+      //   MEMBERS を取り直さないと「新しく追加された担当者の案件」は案件データが手元にあっても描画されない。
+      //   従来この経路（キャッシュあり＝通常起動）に getMembers が無く、
+      //   アプリ復帰時の reloadFromGAS が走るまで案件が出てこなかった（＝「遅れて表示される」）。
+      //   getBoot に同梱済みなので通信は増えない。
+      let _membersChanged = false;
+      const _syncMembers = (async()=>{ try{
+        const membersDataBg = await bootGet('getMembers');
+        if(membersDataBg && Array.isArray(membersDataBg) && membersDataBg.length > 0){
+          const nextMembers = membersDataBg.map(m=>({
+            id:String(m.id||''),name:m.name||'',color:m.color||'#6B7280',role:m.role||'field',pw:'',
+            canAdd:m.canAdd==='true'||m.canAdd===true||m.role==='admin',
+            canCabinet:m.canCabinet==='true'||m.canCabinet===true||m.role==='admin',
+            viewableMembers:m.viewableMembers&&m.viewableMembers!==''?m.viewableMembers.split(',').filter(Boolean):null,
+            abbr:m.abbr||''
+          })).filter(m=>m.id);
+          if(nextMembers.length > 0){
+            // 中身が変わったときだけ再描画する（利用者の担当者フィルタ操作を無駄に戻さないため）
+            const _sig = arr => arr.map(m=>[m.id,m.name,m.role,m.abbr,(m.viewableMembers||[]).join('|')].join('\u0001')).sort().join('\u0002');
+            _membersChanged = _sig(nextMembers) !== _sig(MEMBERS);
+            MEMBERS = nextMembers;
+            saveCacheLS();
+          }
+        }
+      }catch(e){ console.warn('メンバーのバックグラウンド同期スキップ'); } })();
       // カレンダー（案件）・日報・月間目標・写真を同時に同期し、すべて完了してから同期中表示を解除
       // v.135: getBoot 1本に同梱済みなので、ここを増やしても通信は増えない
       const _t0 = Date.now();
-      try{ await Promise.all([_syncCases, _syncReports, loadMonthGoal(), loadMemos(), refreshPhotosFromGAS(true), loadStampsFromGAS()]); }
+      try{
+        await Promise.all([_syncCases, _syncMembers, _syncReports, loadMonthGoal(), loadMemos(), refreshPhotosFromGAS(true), loadStampsFromGAS()]);
+        // v.141: メンバーが変わっていたらフィルタを組み直してから再描画。
+        //   案件の同期（_syncCases）とどちらが先に返っても正しい表示になるよう、最後に一度だけ行う。
+        if(_membersChanged){
+          buildMemberFilters();
+          renderCal();
+          console.log('[sync] メンバーを更新しました: '+MEMBERS.length+'名');
+        }
+      }
       finally{ endSync(); console.log('[boot] 起動同期 完了 '+(Date.now()-_t0)+'ms'); }
     })();
     return;
