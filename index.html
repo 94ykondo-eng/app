@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.139';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.140';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2109,6 +2109,11 @@ function startApp(){
 }
 
 function initAddPanel(){
+  // v.140: 案件票を開いている間（詳細表示/編集中）は日付欄に触らない。
+  //   switchView('calendar') と saveMember() から無条件に呼ばれるため、
+  //   従来は開いている案件の開始日/終了日が「当月1日」に上書きされていた。
+  //   → 協力業者の日ごと欄が当月1日になり、そのまま保存すると案件の工期まで壊れる。
+  if(panelMode==='view' || panelMode==='edit') return;
   const today=`${currentYear}-${String(currentMonth+1).padStart(2,'0')}-01`;
   document.getElementById('ap-start').value=today;
   document.getElementById('ap-end').value=today;
@@ -7107,6 +7112,11 @@ function enterEditMode(){
   document.getElementById('pf-del-btn').style.display='none'; // 編集中は削除非表示
   // ステータスのonchangeをリセット（編集モードでは保存ボタンで確定）
   const _stEl2=document.getElementById('ap-status'); if(_stEl2) _stEl2.onchange=null;
+  // v.140: 編集開始時に日付欄を案件の値から張り直す（保険）。
+  //   何らかの経路で ap-start/ap-end がズレていても、ここで必ず工期に戻る。
+  //   showInputFields() の前に置くこと（renderVendors が ap-start を読むため）。
+  { const _s=document.getElementById('ap-start'); if(_s && c.start) _s.value=c.start;
+    const _e=document.getElementById('ap-end');   if(_e && c.end)   _e.value=c.end; }
   // 入力欄に切替
   showInputFields();
   renderEstDaily();
