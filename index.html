@@ -1845,7 +1845,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.135';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.138';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2329,12 +2329,30 @@ function endSave(){
   updateSaveIndicator();
 }
 let pendingSyncs=0; // 同期中（GASからの読込中）の通信数
+// v.138: 同期カウンタ。どこかで endSync を取りこぼすと「同期中…」が消えなくなるため、
+//   ・begin 側で番犬タイマーを持ち、45秒を超えたら強制的に解除する
+//   ・解除時は isReloading も戻す（ドラッグ操作が効かなくなるのを防ぐ）
+let _syncWatchdog=null;
+function _armSyncWatchdog(){
+  if(_syncWatchdog) clearTimeout(_syncWatchdog);
+  _syncWatchdog=setTimeout(()=>{
+    if(pendingSyncs>0){
+      console.warn('[sync] 45秒を超えたため同期表示を強制解除しました（pendingSyncs='+pendingSyncs+'）');
+      pendingSyncs=0; isReloading=false;
+      try{ showLoadingOverlay(false); }catch(e){}
+      updateSaveIndicator();
+    }
+    _syncWatchdog=null;
+  }, 45000);
+}
 function beginSync(){
   pendingSyncs++;
+  _armSyncWatchdog();
   updateSaveIndicator();
 }
 function endSync(){
   pendingSyncs=Math.max(0,pendingSyncs-1);
+  if(pendingSyncs===0 && _syncWatchdog){ clearTimeout(_syncWatchdog); _syncWatchdog=null; }
   updateSaveIndicator();
 }
 function updateSaveIndicator(){
@@ -3372,6 +3390,8 @@ async function loadFromGAS(){
     }catch(e){ console.warn('旧資料の移行スキップ'); }
   } catch(e){
     console.warn('GAS読込スキップ');
+  } finally{
+    endSync();          // ★ここが無く「同期中…」が消えないままだった
   }
   showLoadingOverlay(false);
   // 管理者がいない場合は初期設定画面へ
@@ -3568,10 +3588,12 @@ async function reloadFromGAS(quiet){
     console.warn('[sync] エラー発生 → バックアップ復元:', e);
     cases        = localCasesBackup;
     DAILY_REPORTS = localRptsBackup;
+  } finally{
+    // どの経路を通っても必ず解除する（途中 return や例外で取り残さない）
+    isReloading = false;
+    endSync();
   }
 
-  isReloading = false;
-  endSync();
   if(!quiet) showLoadingOverlay(false);
 
   // 管理者がいない場合は初期設定画面へ
@@ -7483,11 +7505,25 @@ function openLineSettings(){
       body.innerHTML='<div style="color:var(--text-muted);font-size:13px;line-height:1.7;padding:8px 0">まだ誰も登録されていません。<br>通知を受け取りたい人が、LINEでこのbotに一度メッセージを送ると、ここに名前が表示されます。</div>';
       return;
     }
-    body.innerHTML=list.map(u=>'<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer">'
-      +'<span style="font-size:14px">'+_ktEsc(u.name||u.userId)+'</span>'
-      +'<input type="checkbox" '+(u.notify?'checked':'')+' onchange="lineToggle(\''+_ktEsc(u.userId)+'\',this.checked)" style="width:18px;height:18px;cursor:pointer">'
-      +'</label>').join('');
+    // v.136: LINEの登録者にアプリのメンバーを紐づける。
+    //  紐づけた人の閲覧範囲（viewableMembers）で通知を絞るため、未設定の人には送らない。
+    const opts=(sel)=>'<option value="">（未設定）</option>'+MEMBERS.map(m=>
+      '<option value="'+_ktEsc(m.id)+'"'+(String(sel||'')===String(m.id)?' selected':'')+'>'+_ktEsc(m.name)+'</option>').join('');
+    body.innerHTML=
+      '<div style="font-size:12px;color:var(--text-muted);line-height:1.7;padding:2px 0 10px">管理者・経理にはすべての案件、現場・協力会社には<b>管理者だけが担当の案件を除いた</b>すべてが届きます。誰宛てかを選んでください。<br><b>「（未設定）」の人には通知が届きません。</b></div>'
+      +list.map(u=>'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap">'
+      +'<span style="font-size:14px;flex:1;min-width:90px">'+_ktEsc(u.name||u.userId)
+        +(u.memberId?'':'<span style="font-size:10px;color:var(--danger);margin-left:6px">未設定</span>')+'</span>'
+      +'<select onchange="lineSetMember(\''+_ktEsc(u.userId)+'\',this.value)" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);max-width:130px">'+opts(u.memberId)+'</select>'
+      +'<input type="checkbox" '+(u.notify?'checked':'')+' onchange="lineToggle(\''+_ktEsc(u.userId)+'\',this.checked)" title="通知のオン/オフ" style="width:18px;height:18px;cursor:pointer;flex-shrink:0">'
+      +'</div>').join('');
   }).catch(()=>{ body.innerHTML='<div style="color:var(--danger);font-size:13px">読み込みに失敗しました</div>'; });
+}
+// LINEの登録者にアプリのメンバーを紐づける（管理者のみ・GAS側でも ADMIN_ONLY で担保）
+function lineSetMember(userId, memberId){
+  if(roGuard()) return;
+  gasPost({action:'setLineMember', userId:String(userId), memberId:String(memberId||'')})
+    .then(()=>{ openLineSettings(); });   // 「未設定」バッジを最新化
 }
 function closeLineSettings(){ const m=document.getElementById('line-settings-modal'); if(m) m.classList.remove('open'); }
 function lineToggle(userId, on){ if(roGuard()) return; gasPost({action:'setLineNotify', userId:String(userId), notify:!!on}); }
