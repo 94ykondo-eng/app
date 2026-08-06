@@ -122,6 +122,14 @@
   .setup-logo{font-size:20px;font-weight:700;margin-bottom:4px}
   .cal-logo{height:40px;width:97px;margin:-4px 19px -4px auto;flex-shrink:0;align-self:center}
   .app-version{text-align:center;font-size:11px;color:var(--text-muted);letter-spacing:0.5px;padding:10px 0 6px;flex-shrink:0}
+  /* v.145: 最終更新時刻をバージョンの左に並べる。PC・モバイル共通のフッター要素なので1か所で足りる */
+  .app-foot{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
+  .app-foot .app-version{padding:10px 0 6px}
+  .sync-stamp{font-size:11px;color:var(--text-muted);letter-spacing:0.5px;padding:10px 0 6px;
+    background:none;border:0;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;
+    min-height:32px;display:inline-flex;align-items:center}
+  .sync-stamp.stale{color:#B45309;font-weight:500}
+  .app-version-cal-foot{justify-content:flex-end;padding-right:14px}
   .app-version-cal{text-align:right;padding:6px 14px 6px 0}
   .setup-sub{font-size:12px;color:var(--text-muted);margin-bottom:6px}
   .setup-badge{display:inline-block;background:#D1FAE5;color:#065F46;font-size:11px;font-weight:600;padding:2px 10px;border-radius:99px;margin-bottom:24px}
@@ -1140,7 +1148,10 @@
       ログイン状態を保持する
     </label>
     <button class="login-btn" id="login-submit-btn" onclick="doLogin()">ログイン</button>
-    <div class="app-version"></div>
+    <div class="app-foot">
+      <button type="button" class="sync-stamp" onclick="manualSync()" aria-label="最終更新時刻。押すと再取得"></button>
+      <div class="app-version"></div>
+    </div>
 
   </div>
 </div>
@@ -1257,7 +1268,10 @@
             <div class="cal-wd">木</div><div class="cal-wd">金</div><div class="cal-wd sat">土</div><div class="cal-wd sun">日</div>
           </div>
           <div class="cal-days" id="cal-days"></div>
-          <div class="app-version app-version-cal"></div>
+          <div class="app-foot app-version-cal-foot">
+            <button type="button" class="sync-stamp" onclick="manualSync()" aria-label="最終更新時刻。押すと再取得"></button>
+            <div class="app-version app-version-cal"></div>
+          </div>
         </div>
       </div>
       <!-- 右固定パネル（新規追加 / 閲覧 / 編集 統合） -->
@@ -1845,7 +1859,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.144';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.145';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3086,15 +3100,27 @@ function noteSyncResult(ok){
 // v.144: 最終同期時刻をボタンに出す。古ければ一目で分かるようにする。
 //   （今回のように「1台だけ同期が止まっている」ことに誰も気づけない状態をなくす）
 function renderSyncStamp(){
+  // v.145: 表示先はフッター（PC・モバイル共通）。同期ボタンがあればそちらも従来どおり更新する。
+  const foots = document.querySelectorAll('.sync-stamp');
+  let label, stale = false, title;
+  if(!_lastSyncOkAt){
+    label = '\u66f4\u65b0 \u2014';
+    title = '\u307e\u3060\u53d6\u5f97\u3067\u304d\u3066\u3044\u307e\u305b\u3093\uff08\u62bc\u3059\u3068\u518d\u53d6\u5f97\uff09';
+  } else {
+    const d = new Date(_lastSyncOkAt);
+    const hhmm = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    const mins = Math.floor((Date.now() - _lastSyncOkAt) / 60000);
+    stale = mins >= 30;   // 30分以上前なら注意色
+    label = '\u66f4\u65b0 ' + hhmm + (mins >= 30 ? '\uff08' + (mins >= 120 ? Math.floor(mins/60) + '\u6642\u9593' : mins + '\u5206') + '\u524d\uff09' : '');
+    title = '\u6700\u7d42\u66f4\u65b0 ' + hhmm + '\uff08\u62bc\u3059\u3068\u518d\u53d6\u5f97\uff09';
+  }
+  foots.forEach(el=>{ el.textContent = label; el.title = title; el.classList.toggle('stale', stale); });
   const b = document.getElementById('sync-btn');
-  if(!b) return;
-  if(!_lastSyncOkAt){ b.textContent = '\ud83d\udd04 \u540c\u671f'; return; }
-  const d = new Date(_lastSyncOkAt);
-  const hhmm = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-  const stale = (Date.now() - _lastSyncOkAt) > 10*60*1000;   // 10分以上前なら注意色
-  b.textContent = '\ud83d\udd04 ' + hhmm;
-  b.style.color = stale ? '#B45309' : '';
-  b.title = '\u6700\u7d42\u540c\u671f ' + hhmm + '\uff08\u62bc\u3059\u3068\u518d\u53d6\u5f97\uff09';
+  if(b){
+    b.textContent = _lastSyncOkAt ? '\ud83d\udd04 ' + label.replace('\u66f4\u65b0 ','') : '\ud83d\udd04 \u540c\u671f';
+    b.style.color = stale ? '#B45309' : '';
+    b.title = title;
+  }
 }
 // v.144: 手動同期。結果をその場に出す（押しても何も起きない状態をなくす）
 async function manualSync(){
@@ -3685,35 +3711,20 @@ function _onForegroundSync(){
   reloadFromGAS(true); // 静かモード（全画面オーバーレイなし・ヘッダーの「同期中…」のみ）
 }
 document.addEventListener('visibilitychange', _onForegroundSync);
-// v.144: 定期同期。★これが無かったのが今回の本丸。
-//   同期のきっかけは「起動時」「復帰時」「手動」の3つだけで、setInterval が1つも無かった。
-//   アプリを開きっぱなしにしている端末は、他端末の変更を永久に受け取れなかった。
-//   ・画面が見えているときだけ実行（バックグラウンドではGASを叩かない）
-//   ・保存中・同期中はスキップ（次の周期で拾う）
-//   ・失敗が続いたら間隔を広げる（90秒 → 3分 → 10分）。回線が悪い現場で叩き続けない
-const _SYNC_BASE_MS = 90 * 1000;
-let _syncTimer = null;
-function _autoSyncIntervalMs(){
-  if(_syncFailStreak >= 4) return 10 * 60 * 1000;
-  if(_syncFailStreak >= 2) return 3 * 60 * 1000;
-  return _SYNC_BASE_MS;
+// v.145: 定期同期（90秒）は廃止した。
+//   ・案件票を開いて入力している最中に走ると、裏でカレンダーが再描画され、
+//     同時編集時に相手の変更を上書きする経路も残るため。
+//   ・同期のきっかけは「起動時」「画面復帰」「手動」の3つに戻す。
+//     ただし v.144 以前と違い、手動経路は getBoot 1往復＋リトライ付きなので空振りしない。
+//   ・代わりにフッターへ最終更新時刻を常時表示し、古さが一目で分かるようにする。
+function startAutoSync(){ renderSyncStamp(); _startStampTicker(); }
+let _stampTimer = null;
+function _startStampTicker(){
+  // 表示だけを1分ごとに描き直す。GASへの通信は一切行わない。
+  if(_stampTimer) clearInterval(_stampTimer);
+  _stampTimer = setInterval(renderSyncStamp, 60*1000);
 }
-async function _autoSyncTick(){
-  try{
-    if(!currentUser) return;
-    if(document.visibilityState !== 'visible') return;
-    if(isReloading || pendingSyncs > 0 || pendingSaves > 0) return;
-    if(Date.now() - _lastAutoSyncAt < _SYNC_BASE_MS - 5000) return;   // 復帰同期の直後は空振りさせる
-    await reloadFromGAS(true);   // 静かモード（オーバーレイなし）
-  }catch(e){ console.warn('[sync] 定期同期スキップ'); }
-  finally{ _scheduleAutoSync(); }
-}
-function _scheduleAutoSync(){
-  if(_syncTimer) clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(_autoSyncTick, _autoSyncIntervalMs());
-}
-function startAutoSync(){ renderSyncStamp(); _scheduleAutoSync(); }
-function stopAutoSync(){ if(_syncTimer){ clearTimeout(_syncTimer); _syncTimer = null; } }
+function stopAutoSync(){ if(_stampTimer){ clearInterval(_stampTimer); _stampTimer = null; } }
 
 
 async function reloadFromGAS(quiet){
