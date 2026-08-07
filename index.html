@@ -1859,7 +1859,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.146';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.147';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -1870,6 +1870,17 @@ const getMember = id => { const sid=String(id||''); return sid ? MEMBERS.find(m=
 // 複数担当者ヘルパー
 function getAssignees(c){ if(Array.isArray(c.assignees)&&c.assignees.filter(Boolean).length) return c.assignees.filter(Boolean); return c.assignee?[c.assignee]:[]; }
 function primaryAssignee(c){ return getAssignees(c)[0]||''; }
+// v.147: カレンダーの表示判定用。担当者に加えて協力会社(c.vendors)も対象に含める。
+//   ★getAssignees は保存・通知・権限判定でも使うため、そちらは変更しない。
+//   協力会社しか設定していない案件は assignees が空で、
+//   [].some(...) が必ず false になるため、従来は何をしても表示されなかった。
+function getFilterMembers(c){
+  if(!c) return [];
+  const a = getAssignees(c).map(String);
+  const v = (c && Array.isArray(c.vendors) ? c.vendors : [])
+    .map(x => String((x && x.id) || '')).filter(Boolean);
+  return a.concat(v);
+}
 // v.114: メンバー削除時の担当クリーンアップ関連
 //   案件の担当(assignees/assignee)から削除IDを取り除く。主担当が削除IDなら残った担当の先頭へ繰り上げ(P1)。
 //   戻り値: { changed:[変更のあった案件...], emptied:[担当が空になった案件...] }
@@ -5722,11 +5733,19 @@ function toggleVendorGroup(checked){
 
 function toggleMember(id,checked){ checked?visibleMembers.add(id):visibleMembers.delete(id); renderCal(); }
 function sbToggleAllMembers(on){
+  // v.147: 協力会社のチェックボックスは data-mid を持たず、
+  //   cb.checked への代入では onchange も発火しないため、従来は visibleMembers が更新されなかった。
+  //   その結果「クリア→すべて」を押すと、チェックは入っているのに協力会社の案件だけ消えたままになった。
   document.querySelectorAll('#member-filters input[type=checkbox]').forEach(cb=>{
     if(cb.disabled) return;
     cb.checked=on;
     const id=cb.dataset.mid;
-    if(id!=null) on ? visibleMembers.add(id) : visibleMembers.delete(id);
+    if(id!=null){ on ? visibleMembers.add(id) : visibleMembers.delete(id); return; }
+    if(cb.id==='vendor-group-chk'){
+      MEMBERS.filter(m=>m.role==='vendor').forEach(m=>{
+        on ? visibleMembers.add(m.id) : visibleMembers.delete(m.id);
+      });
+    }
   });
   renderCal();
 }
@@ -6147,7 +6166,7 @@ function renderCal(){
 
   // 表示対象の案件を絞り込み
   visibleCases=cases.filter(c=>
-    getAssignees(c).some(id=>visibleMembers.has(id))&&statuses.has(c.status)&&canViewCase(c)
+    getFilterMembers(c).some(id=>visibleMembers.has(id))&&statuses.has(c.status)&&canViewCase(c)
   );
 
   // 帯レイアウト: 案件ごとに1つのrowを割り当て（週をまたいでも同じrow＝1本のまっすぐな帯）
