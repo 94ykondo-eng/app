@@ -1859,7 +1859,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.147';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.148';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -8033,6 +8033,16 @@ function billingToggleClientFilter(gi){
 }
 function billingClearClientFilter(){ billingClientFilter=null; renderBilling(); }
 let billingCollapsed = new Set();   // 閉じている顧客名
+// v.148: 注文書も会社ごとにたためるようにする（請求書と同じ方式）。
+//   ★閉じている「会社名」を持つ。並び順(gi)で持つと、絞り込みや月替わりで
+//     行の並びが変わったときに別の会社が閉じてしまう。
+let orderCollapsed = new Set();     // 閉じている協力会社名
+function orderToggleCollapse(gi){
+  const g=(window._orderGroups||[])[gi]; if(!g) return;
+  if(orderCollapsed.has(g.vendor)) orderCollapsed.delete(g.vendor); else orderCollapsed.add(g.vendor);
+  renderOrder();
+}
+
 function billingToggleCollapse(gi){
   const g=(window._billingGroups||[])[gi]; if(!g) return;
   if(billingCollapsed.has(g.client)) billingCollapsed.delete(g.client); else billingCollapsed.add(g.client);
@@ -8657,15 +8667,16 @@ function renderOrder(){
     const sel=g.items.filter(r=>!orderExcluded.has(r.key));
     const sub=sel.reduce((a,r)=>({amt:a.amt+r.amt,tax:a.tax+r.tax,total:a.total+r.total}),{amt:0,tax:0,total:0});
     const groupChecked=g.items.every(r=>!orderExcluded.has(r.key));
+    const collapsed=orderCollapsed.has(g.vendor);
     html+=`<tr style="background:#FEF3E2">
       <td style="padding:7px 6px;text-align:center;border-bottom:1px solid var(--border)"><input type="checkbox" ${groupChecked?'checked':''} onchange="orderToggleGroup(${gi},this.checked)"></td>
-      <td colspan="2" style="padding:7px 6px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:#B45309">${escHtml(g.vendor)} <span style="font-size:10px;font-weight:400;color:var(--text-muted)">${sel.length}件</span></td>
+      <td colspan="2" onclick="orderToggleCollapse(${gi})" style="padding:7px 6px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:#B45309;cursor:pointer;user-select:none"><span style="display:inline-block;width:14px;font-size:10px;color:var(--text-muted)">${collapsed?'▶':'▼'}</span>${escHtml(g.vendor)} <span style="font-size:10px;font-weight:400;color:var(--text-muted)">${sel.length}件</span></td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.amt)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.tax)}</td>
       <td style="padding:7px 6px;text-align:right;border-bottom:1px solid var(--border);font-weight:700">${yen(sub.total)}</td>
       <td style="border-bottom:1px solid var(--border)"></td>
     </tr>`;
-    g.items.forEach(r=>{
+    if(!collapsed) g.items.forEach(r=>{
       const chk=!orderExcluded.has(r.key);
       html+=`<tr>
         <td style="padding:7px 6px;text-align:center;border-bottom:1px solid #F0EEE8"><input type="checkbox" ${chk?'checked':''} onchange="orderToggle('${r.key}',this.checked)"></td>
