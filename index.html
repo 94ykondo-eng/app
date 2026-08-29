@@ -1753,6 +1753,7 @@
 
     <div class="pdf-btn-row">
       <button class="pdf-btn" onclick="closePdfModal()">キャンセル</button>
+      <button class="pdf-btn" onclick="exportReportCSV()">CSV出力</button>
       <button class="pdf-btn primary" onclick="generatePdf()">📄 プレビューを開く</button>
     </div>
   </div>
@@ -1859,7 +1860,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.148';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.150';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4764,6 +4765,73 @@ function pdfToggleAllStaff(checked){
   document.querySelectorAll('.pdf-staff-chk').forEach(c=>c.checked=checked);
 }
 
+// v.150: CSVのセルを安全に囲む。カンマ・改行・引用符を含む値を壊さない。
+function csvCell(v){
+  const t = String(v == null ? '' : v);
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+// v.150: 日報のCSV出力。1日1行で、休み・未提出も必ず1行出す（抜けの確認が目的）。
+//   ★案件ごとに行を分けると日付が飛んで見えるため、1セルにまとめる。
+function exportReportCSV(){
+  const startDs = document.getElementById('pdf-start-date').value;
+  const endDs   = document.getElementById('pdf-end-date').value;
+  if(!startDs||!endDs){ alert('期間を指定してください'); return; }
+  if(startDs>endDs){ alert('開始日は終了日より前にしてください'); return; }
+  const selStaff = [...document.querySelectorAll('.pdf-staff-chk:checked')].map(c=>c.value);
+  if(selStaff.length===0){ alert('対象スタッフを選択してください'); return; }
+
+  const DOW = ['日','月','火','水','木','金','土'];
+  const dates = (()=>{ const out=[]; let d=new Date(startDs+'T00:00:00');
+    const last=new Date(endDs+'T00:00:00');
+    while(d<=last){ out.push(fmtDate(d)); d.setDate(d.getDate()+1); } return out; })();
+
+  const head = ['日付','曜日','スタッフ','状態','出勤','退勤','担当案件','特記事項']
+    .concat(GROWTH_FIELDS.map(f=>f.label));
+  const rows = [head];
+
+  selStaff.forEach(uid=>{
+    const m = getMember(uid); if(!m) return;
+    const byDate = {};
+    DAILY_REPORTS.filter(r=>r.user===uid&&r.date>=startDs&&r.date<=endDs)
+      .forEach(r=>{ byDate[r.date]=r; });
+
+    dates.forEach(ds=>{
+      const r = byDate[ds];
+      const submitted = !!(r && (r.submittedAt || r.firstSubmittedAt));
+      const exempt = isReportExempt(ds, uid);
+      const state = submitted ? '出勤' : (exempt ? '休み' : '未提出');
+      const caseTxt = (submitted && Array.isArray(r.cases))
+        ? r.cases.map(rc=>{
+            const c = cases.find(x=>x.id===rc.caseId);
+            return (c?.name||rc.caseId) + '(' + (rc.status||'') + ')';
+          }).join('／')
+        : '';
+      const row = [
+        ds, DOW[new Date(ds+'T00:00:00').getDay()], m.name, state,
+        submitted ? (normalizeTime(r.startTime)||'') : '',
+        submitted ? (normalizeTime(r.endTime)||'')   : '',
+        caseTxt,
+        submitted ? (r.note||'') : '',
+      ];
+      GROWTH_FIELDS.forEach(f=>{
+        row.push(submitted && r.growth ? (r.growth[f.key]||'') : '');
+      });
+      rows.push(row);
+    });
+  });
+
+  const csv = rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
+  const now = new Date();
+  const fn = '日報_' + startDs.replace(/-/g,'') + '-' + endDs.replace(/-/g,'') + '.csv';
+  // ★BOM付きでないとExcelで日本語が化ける
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = fn;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  showToast('CSVを出力しました（' + (rows.length-1) + '行）', 'success');
+}
+
 function generatePdf(){
   const startDs = document.getElementById('pdf-start-date').value;
   const endDs   = document.getElementById('pdf-end-date').value;
@@ -4784,120 +4852,208 @@ function generatePdf(){
 
   const stColors = {未対応:'#9CA3AF',日延:'#FBBF24',完了:'#10B981'};
 
+  // v.150: 期間内の日付を1日も飛ばさず並べる（抜けの確認が目的）
+  const getDatesInRange = (sd, ed) => {
+    const out = []; let d = new Date(sd + 'T00:00:00');
+    const last = new Date(ed + 'T00:00:00');
+    while (d <= last) { out.push(fmtDate(d)); d.setDate(d.getDate() + 1); }
+    return out;
+  };
+  const DOW = ['日','月','火','水','木','金','土'];
+  const dowOf = ds => DOW[new Date(ds + 'T00:00:00').getDay()];
+  // 「休み」案件の名前（「盆休み」等）を拾う。無ければ空。
+  const holidayNameOf = (uid, ds) => {
+    const c = cases.find(x => {
+      const st = x.start, en = x.end || x.start;
+      if (!st || ds < st || ds > en) return false;
+      if (!getAssignees(x).map(String).includes(String(uid))) return false;
+      return String(x.name || '').includes('休み');
+    });
+    return c ? String(c.name || '') : '';
+  };
+
+  const logo = getLogoDataUrl();
+
   let html = `<style>
-    body{font-family:'Hiragino Sans','Meiryo',sans-serif;font-size:12px;color:#1f2937}
-    .pdf-page{padding:24px 28px;max-width:800px;margin:0 auto}
-    .pdf-cover{text-align:center;padding:60px 0}
-    .pdf-staff-title{font-size:16px;font-weight:700;border-bottom:2px solid #1f2937;padding-bottom:6px;margin:20px 0 14px}
-    .pdf-day-block{margin-bottom:14px;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px}
-    .pdf-day-header{font-size:13px;font-weight:600;margin-bottom:8px;color:#374151}
-    .pdf-attendance{font-size:11px;color:#6b7280;margin-bottom:8px}
-    .pdf-case-item{border-left:3px solid #3b82f6;padding:4px 8px;margin-bottom:6px;background:#f9fafb;border-radius:0 4px 4px 0}
-    .pdf-case-name{font-weight:500;margin-bottom:2px}
-    .pdf-case-status{display:inline-block;padding:1px 6px;border-radius:99px;font-size:10px;font-weight:600;margin-bottom:3px}
-    .pdf-note{background:#fef9c3;padding:6px 8px;border-radius:4px;font-size:11px;margin-top:8px;white-space:pre-wrap}
-    .pdf-growth{margin-top:8px}
-    .pdf-growth-item{margin-bottom:4px;font-size:11px;white-space:pre-wrap}
-    .pdf-growth-label{font-weight:600;color:#6b7280}
-    .pdf-summary{margin-top:20px}
-    .pdf-summary-table{width:100%;border-collapse:collapse;font-size:12px}
-    .pdf-summary-table th{background:#f3f4f6;padding:6px 10px;text-align:left;border:1px solid #e5e7eb}
-    .pdf-summary-table td{padding:6px 10px;border:1px solid #e5e7eb}
-    @media print{.pdf-page{page-break-after:always}.pdf-page:last-child{page-break-after:avoid}}
+    body{font-family:'Hiragino Sans','Meiryo',sans-serif;font-size:11.5px;color:#1f2937;margin:0}
+    .pdf-page{padding:26px 30px 34px;max-width:820px;margin:0 auto;position:relative}
+    .pdf-cover{text-align:center;padding:120px 0 0}
+    .pdf-cover-logo{width:96px;height:96px;margin:0 auto 22px;display:block}
+    .pdf-cover-co{font-size:15px;letter-spacing:0.18em;color:#6b7280;margin-bottom:34px}
+    .pdf-cover-title{font-size:30px;font-weight:700;letter-spacing:0.08em;margin-bottom:10px}
+    .pdf-cover-rule{width:70px;height:2px;background:#1f2937;margin:18px auto 26px}
+    .pdf-cover-meta{font-size:13px;color:#4b5563;line-height:2}
+    .pdf-head{display:flex;align-items:center;gap:9px;border-bottom:1.5px solid #1f2937;padding-bottom:8px;margin-bottom:16px}
+    .pdf-head-logo{width:22px;height:22px}
+    .pdf-head-co{font-size:10.5px;color:#6b7280;letter-spacing:0.1em}
+    .pdf-head-name{font-size:16px;font-weight:700;margin-left:auto}
+    .pdf-head-range{font-size:10.5px;color:#6b7280;margin-left:10px}
+    .pdf-alert{border:1px solid #FCA5A5;background:#FEF2F2;border-radius:5px;padding:8px 11px;margin-bottom:14px;font-size:11.5px;color:#991B1B}
+    .pdf-alert b{font-weight:700}
+    .pdf-ok{border:1px solid #A7F3D0;background:#ECFDF5;border-radius:5px;padding:8px 11px;margin-bottom:14px;font-size:11.5px;color:#065F46}
+    .pdf-day{border:1px solid #e5e7eb;border-radius:5px;margin-bottom:9px;page-break-inside:avoid;break-inside:avoid}
+    .pdf-day-hd{display:flex;align-items:baseline;gap:9px;padding:7px 11px;border-bottom:1px solid #f3f4f6;background:#fafafa}
+    .pdf-day-date{font-size:12.5px;font-weight:600}
+    .pdf-day-dow{font-size:10.5px;color:#9ca3af}
+    .pdf-day-time{margin-left:auto;font-size:10.5px;color:#6b7280}
+    .pdf-day-bd{padding:9px 11px}
+    .pdf-badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10px;font-weight:700;letter-spacing:0.04em}
+    .pdf-day.miss{border-color:#FCA5A5}
+    .pdf-day.miss .pdf-day-hd{background:#FEF2F2;border-bottom-color:#FEE2E2}
+    .pdf-day.miss .pdf-day-date{color:#B91C1C}
+    .pdf-miss-txt{color:#DC2626;font-weight:700;font-size:12px}
+    .pdf-day.off .pdf-day-hd{background:#f9fafb}
+    .pdf-day.off .pdf-day-date{color:#6b7280}
+    .pdf-off-txt{color:#6b7280;font-size:11.5px}
+    .pdf-case{border-left:2.5px solid #3b82f6;padding:4px 9px;margin-bottom:5px;background:#f9fafb;border-radius:0 4px 4px 0}
+    .pdf-case:last-child{margin-bottom:0}
+    .pdf-case-nm{font-weight:600;font-size:11.5px;margin-bottom:2px}
+    .pdf-case-memo{font-size:11px;color:#374151;white-space:pre-wrap;margin-top:2px}
+    .pdf-sec{margin-top:8px;padding-top:7px;border-top:1px dashed #e5e7eb}
+    .pdf-sec-lb{font-size:10px;font-weight:700;color:#6b7280;letter-spacing:0.08em;margin-bottom:3px}
+    .pdf-sec-tx{font-size:11px;white-space:pre-wrap;line-height:1.65}
+    .pdf-growth-item{margin-bottom:5px}
+    .pdf-growth-item:last-child{margin-bottom:0}
+    .pdf-growth-lb{font-size:10px;font-weight:700;color:#6b7280}
+    .pdf-growth-tx{font-size:11px;white-space:pre-wrap;line-height:1.65}
+    .pdf-summary-table{width:100%;border-collapse:collapse;font-size:11.5px}
+    .pdf-summary-table th{background:#f3f4f6;padding:7px 10px;text-align:left;border:1px solid #e5e7eb;font-size:11px}
+    .pdf-summary-table td{padding:7px 10px;border:1px solid #e5e7eb}
+    .pdf-summary-table td.miss{color:#DC2626;font-weight:700}
+    .pdf-foot{position:absolute;left:30px;right:30px;bottom:12px;display:flex;font-size:9.5px;color:#9ca3af;border-top:1px solid #f3f4f6;padding-top:6px}
+    @media print{
+      .pdf-page{page-break-after:always}
+      .pdf-page:last-child{page-break-after:avoid}
+      .pdf-day{page-break-inside:avoid}
+    }
   </style>`;
 
-  // 表紙
+  const coName = (typeof COMPANY_NAME !== 'undefined' && COMPANY_NAME) ? COMPANY_NAME : '';
+  const foot = (label) => `<div class="pdf-foot"><span>${escHtml(coName)}</span><span style="margin-left:auto">${escHtml(label)}</span></div>`;
+
+  // ── 表紙 ──
   html += `<div class="pdf-page pdf-cover">
-    <div style="font-size:28px;font-weight:700;margin-bottom:16px">現場管理日報</div>
-    <div style="font-size:15px;color:#6b7280;margin-bottom:8px">期間：${fmtDateJp(startDs)} 〜 ${fmtDateJp(endDs)}</div>
-    <div style="font-size:13px;color:#9ca3af">出力日：${fmtDateJp(getTodayStr())}</div>
-    <div style="font-size:13px;color:#9ca3af;margin-top:4px">対象：${selStaff.map(id=>getMember(id)?.name||id).join('・')}</div>
+    ${logo ? `<img class="pdf-cover-logo" src="${logo}" alt="">` : ''}
+    ${coName ? `<div class="pdf-cover-co">${escHtml(coName)}</div>` : ''}
+    <div class="pdf-cover-title">現場管理日報</div>
+    <div class="pdf-cover-rule"></div>
+    <div class="pdf-cover-meta">
+      <div>期間　${fmtDateJp(startDs)} 〜 ${fmtDateJp(endDs)}</div>
+      <div>対象　${selStaff.map(id=>escHtml(getMember(id)?.name||id)).join('・')}</div>
+      <div>出力日　${fmtDateJp(getTodayStr())}</div>
+    </div>
   </div>`;
 
-  // スタッフごとのページ
+  const allDates = getDatesInRange(startDs, endDs);
+
+  // ── スタッフごとのページ ──
   selStaff.forEach(uid=>{
     const member = getMember(uid);
     if(!member) return;
-    const reports = DAILY_REPORTS.filter(r=>r.user===uid&&r.date>=startDs&&r.date<=endDs)
-      .sort((a,b)=>a.date.localeCompare(b.date));
+    const byDate = {};
+    DAILY_REPORTS.filter(r=>r.user===uid&&r.date>=startDs&&r.date<=endDs)
+      .forEach(r=>{ byDate[r.date] = r; });
+
+    // 先に未提出日を数える（ページ先頭の要約に使う）
+    const missing = allDates.filter(ds=>{
+      const r = byDate[ds];
+      if(r && (r.submittedAt || r.firstSubmittedAt)) return false;
+      return !isReportExempt(ds, uid);     // 休みは未提出に数えない
+    });
 
     html += `<div class="pdf-page">
-      <div class="pdf-staff-title">
-        ${escHtml(member.name)}　<span style="font-size:12px;font-weight:400;color:#6b7280">${fmtDateJp(startDs)} 〜 ${fmtDateJp(endDs)}</span>
+      <div class="pdf-head">
+        ${logo ? `<img class="pdf-head-logo" src="${logo}" alt="">` : ''}
+        ${coName ? `<span class="pdf-head-co">${escHtml(coName)}</span>` : ''}
+        <span class="pdf-head-name">${escHtml(member.name)}</span>
+        <span class="pdf-head-range">${fmtDateJp(startDs)} 〜 ${fmtDateJp(endDs)}</span>
       </div>`;
 
-    if(reports.length===0){
-      html += `<div style="color:#9ca3af;padding:20px 0;text-align:center">この期間の日報はありません</div>`;
-    } else {
-      reports.forEach(r=>{
-        html += `<div class="pdf-day-block">
-          <div class="pdf-day-header">${fmtDateJp(r.date)}</div>`;
+    html += missing.length
+      ? `<div class="pdf-alert"><b>未提出 ${missing.length}日</b>　${missing.map(d=>escHtml(d.slice(5).replace('-','/'))).join('・')}</div>`
+      : `<div class="pdf-ok">この期間の日報はすべて提出されています。</div>`;
 
-        if(incAttendance){
-          html += `<div class="pdf-attendance">🕐 出勤 ${normalizeTime(r.startTime)||'——'} 〜 退勤 ${normalizeTime(r.endTime)||'——'}　提出 ${r.firstSubmittedAt||r.submittedAt||''}${r.reEditedAt?'　再編集 '+normalizeTime(r.reEditedAt):''}</div>`;
-        }
+    allDates.forEach(ds=>{
+      const r = byDate[ds];
+      const submitted = !!(r && (r.submittedAt || r.firstSubmittedAt));
+      const exempt = isReportExempt(ds, uid);
+      const cls = submitted ? '' : (exempt ? ' off' : ' miss');
 
+      html += `<div class="pdf-day${cls}">
+        <div class="pdf-day-hd">
+          <span class="pdf-day-date">${fmtDateJp(ds)}</span>
+          <span class="pdf-day-dow">(${dowOf(ds)})</span>`;
+
+      if(submitted && incAttendance){
+        html += `<span class="pdf-day-time">出勤 ${normalizeTime(r.startTime)||'——'}　退勤 ${normalizeTime(r.endTime)||'——'}${r.reEditedAt?'　再編集あり':''}</span>`;
+      }
+      html += `</div><div class="pdf-day-bd">`;
+
+      if(!submitted && !exempt){
+        html += `<span class="pdf-miss-txt">未提出</span>`;
+      } else if(!submitted && exempt){
+        const hn = holidayNameOf(uid, ds);
+        html += `<span class="pdf-off-txt">休み${hn && hn!=='休み' ? '（'+escHtml(hn)+'）' : ''}</span>`;
+      } else {
+        let body = '';
         if(incCases && r.cases?.length>0){
           r.cases.forEach(rc=>{
             const c = cases.find(x=>x.id===rc.caseId);
             const sc = stColors[rc.status]||'#9CA3AF';
             const bg = rc.status==='完了'?'#D1FAE5':rc.status==='日延'?'#FEF9C3':'#F3F4F6';
-            html += `<div class="pdf-case-item">
-              <div class="pdf-case-name">${escHtml(c?.name||rc.caseId)}</div>
-              <span class="pdf-case-status" style="background:${bg};color:${sc}">${rc.status}</span>
-              ${rc.memo?`<div style="font-size:11px;color:#374151">${escHtml(rc.memo)}</div>`:''}
+            body += `<div class="pdf-case">
+              <div class="pdf-case-nm">${escHtml(c?.name||rc.caseId)} <span class="pdf-badge" style="background:${bg};color:${sc}">${escHtml(rc.status)}</span></div>
+              ${rc.memo?`<div class="pdf-case-memo">${escHtml(rc.memo)}</div>`:''}
             </div>`;
           });
         }
-
         if(incNote && r.note){
-          html += `<div class="pdf-note">📌 特記事項：${escHtml(r.note)}</div>`;
+          body += `<div class="pdf-sec"><div class="pdf-sec-lb">特記事項</div><div class="pdf-sec-tx">${escHtml(r.note)}</div></div>`;
         }
-
-        if(incGrowth && r.growth){
-          const hasGrowth = GROWTH_FIELDS.some(f=>r.growth[f.key]);
-          if(hasGrowth){
-            html += `<div class="pdf-growth">`;
-            GROWTH_FIELDS.forEach(f=>{
-              if(r.growth[f.key]){
-                html += `<div class="pdf-growth-item">
-                  <span class="pdf-growth-label">【${f.label}】</span>
-                  ${escHtml(r.growth[f.key])}
-                </div>`;
-              }
-            });
-            html += `</div>`;
-          }
+        if(incGrowth && r.growth && GROWTH_FIELDS.some(f=>r.growth[f.key])){
+          body += `<div class="pdf-sec"><div class="pdf-sec-lb">成長記録</div>`;
+          GROWTH_FIELDS.forEach(f=>{
+            if(r.growth[f.key]){
+              body += `<div class="pdf-growth-item">
+                <div class="pdf-growth-lb">${escHtml(f.label)}</div>
+                <div class="pdf-growth-tx">${escHtml(r.growth[f.key])}</div>
+              </div>`;
+            }
+          });
+          body += `</div>`;
         }
+        html += body || `<span style="color:#9ca3af;font-size:11px">記入内容なし</span>`;
+      }
+      html += `</div></div>`;
+    });
 
-        html += `</div>`;
-      });
-    }
-    html += `</div>`;
+    html += foot(escHtml(member.name)) + `</div>`;
   });
 
   // 月次サマリー
   if(incSummary){
     html += `<div class="pdf-page">
-      <div class="pdf-staff-title">勤怠サマリー</div>
+      <div class="pdf-head">
+        ${logo ? `<img class="pdf-head-logo" src="${logo}" alt="">` : ''}
+        ${coName ? `<span class="pdf-head-co">${escHtml(coName)}</span>` : ''}
+        <span class="pdf-head-name">勤怠サマリー</span>
+        <span class="pdf-head-range">${fmtDateJp(startDs)} 〜 ${fmtDateJp(endDs)}</span>
+      </div>
       <table class="pdf-summary-table">
-        <tr><th>スタッフ</th><th>提出日数</th><th>未提出日</th><th>平均出勤時間</th></tr>`;
-
-    // 期間内の日数を算出
-    const getDatesInRange = (s,e)=>{
-      const dates=[]; let d=new Date(s+'T00:00:00');
-      const end=new Date(e+'T00:00:00');
-      while(d<=end){ dates.push(fmtDate(d)); d.setDate(d.getDate()+1); }
-      return dates;
-    };
-    const allDates = getDatesInRange(startDs, endDs);
+        <tr><th>スタッフ</th><th style="text-align:center">提出</th><th style="text-align:center">休み</th><th style="text-align:center">未提出</th><th style="text-align:center">平均出勤</th><th>未提出日</th></tr>`;
 
     selStaff.forEach(uid=>{
       const m = getMember(uid);
       if(!m) return;
       const rpts = DAILY_REPORTS.filter(r=>r.user===uid&&r.date>=startDs&&r.date<=endDs);
-      const submitted = rpts.length;
-      const notSubmitted = allDates.length - submitted;
+      const submitted = rpts.filter(r=>r.submittedAt||r.firstSubmittedAt).length;
+      // v.149: 「休み」案件の担当日は未提出に数えない
+      const offList  = allDates.filter(d=>!rpts.some(r=>r.date===d) && isReportExempt(d, uid));
+      const missList = allDates.filter(d=>{
+        const r = rpts.find(x=>x.date===d);
+        if(r && (r.submittedAt||r.firstSubmittedAt)) return false;
+        return !isReportExempt(d, uid);
+      });
       // 平均出勤時間
       const startTimes = rpts.filter(r=>r.startTime).map(r=>{
         const t=normalizeTime(r.startTime);
@@ -4910,12 +5066,14 @@ function generatePdf(){
       html += `<tr>
         <td>${escHtml(m.name)}</td>
         <td style="text-align:center">${submitted}日</td>
-        <td style="text-align:center;color:${notSubmitted>0?'#EF4444':'#10B981'}">${notSubmitted}日</td>
+        <td style="text-align:center;color:#6b7280">${offList.length}日</td>
+        <td style="text-align:center" class="${missList.length>0?'miss':''}">${missList.length}日</td>
         <td style="text-align:center">${avgStart}</td>
+        <td style="font-size:10.5px;color:${missList.length>0?'#DC2626':'#9ca3af'}">${missList.length>0?missList.map(d=>escHtml(d.slice(5).replace('-','/'))).join('・'):'——'}</td>
       </tr>`;
     });
 
-    html += `</table></div>`;
+    html += `</table>` + foot('勤怠サマリー') + `</div>`;
   }
 
   area.innerHTML = html;
@@ -5057,8 +5215,8 @@ function checkUnsubmittedReports(){
     if(c.status!=='完了') return false;
     if(!getAssignees(c).includes(currentUser)) return false;
     if(c.end!==todayStr&&c.end!==ydStr) return false;
-    const rpt=getMyReport(c.end);
-    return !(rpt?.submittedAt||rpt?.firstSubmittedAt);
+    // v.149: 「休み」案件の担当日は提出済み扱い＝催促しない
+    return !isReportDone(c.end, currentUser);
   });
   if(!unreported.length) return;
   const msg=unreported.length===1
@@ -7885,6 +8043,25 @@ function kintaiIsHoliday(memberId, dateStr){
   });
 }
 
+// v.149: 日報の「提出済み扱い」判定。
+//   案件名に「休み」を含む案件の担当日は、日報を書かなくても提出済みとして扱う。
+//   ★データ（DAILY_REPORTS）は作らない。表示だけを変える。
+//     レコードを作るとGASへの書き込みが発生し、後から案件名を直したときに矛盾が残るため。
+//     表示だけなら案件名を直せばその場で追従する。
+//   出退勤時刻は従来どおり空欄のまま（勤怠タブの「休み」バッジも従来どおり）。
+function isReportExempt(dateStr, memberId){
+  return kintaiIsHoliday(memberId || currentUser, dateStr);
+}
+// 実際に提出されたか、または休みで免除されているか
+function isReportDone(dateStr, memberId){
+  const mid = memberId || currentUser;
+  const r = (typeof getMyReport === 'function' && (!memberId || memberId === currentUser))
+    ? getMyReport(dateStr)
+    : DAILY_REPORTS.find(x => String(x.user) === String(mid) && x.date === dateStr);
+  if(r && (r.submittedAt || r.firstSubmittedAt)) return true;
+  return isReportExempt(dateStr, mid);
+}
+
 // その日の日報（出退勤）
 function kintaiReport(memberId, dateStr){
   const mid = String(memberId||'');
@@ -9815,6 +9992,15 @@ let STAMPS = [
 // スタンプリアクション: {reportId, stampId, userId, date}
 let STAMP_REACTIONS = [];
 
+// v.150: PDF用ロゴ。<head> の apple-touch-icon と同じ画像を参照する。
+//   ★画像を二重に埋め込むとファイルが約30KB増えるため、DOMから取り出して使い回す。
+function getLogoDataUrl(){
+  try{
+    const el = document.querySelector('link[rel="apple-touch-icon"]');
+    return (el && el.getAttribute('href')) || '';
+  }catch(e){ return ''; }
+}
+
 const GROWTH_FIELDS = [
   {key:'monthResult',    label:'月間目標の結果とその理由',     color:'#0D9488', desc:'今月の月間目標に対して、意識した・行動した結果どうなったかを入力'},
   {key:'weekGoal',       label:'今週の行動目標',               color:'#3B82F6', desc:'今週毎日意識する又は、行う行動をシンプルに書く'},
@@ -10102,8 +10288,12 @@ function renderReportMiniCal(){
     // 自分の担当案件があるか
     const hasCases = cases.some(c=>c.start<=dayDs&&dayDs<=c.end&&getAssignees(c).includes(currentUser));
 
+    const exemptDay = isReportExempt(dayDs, currentUser);   // v.149: 「休み」案件の日
     let dotHtml = '';
-    if(submitted){
+    if(!submitted && exemptDay){
+      // 休み：「休」ラベル（「未」にしない）
+      dotHtml = `<div style="font-size:9px;font-weight:700;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:0 3px;line-height:12px">休</div>`;
+    } else if(submitted){
       // 提出済み：「済」ラベル
       dotHtml = `<div style="font-size:9px;font-weight:700;color:#fff;background:${myColor};border-radius:3px;padding:0 3px;line-height:14px">済</div>`;
     } else if(!isFuture && hasCases){
@@ -10151,7 +10341,8 @@ function renderReportView(){
   const ds = window.rpDate;
   const dayCases = cases.filter(c=>c.start<=ds&&ds<=c.end&&getAssignees(c).includes(currentUser));
   const existing = getMyReport(ds);
-  const submitted = existing?.submittedAt;
+  const exempt = isReportExempt(ds, currentUser);          // v.149: 「休み」案件の日
+  const submitted = existing?.submittedAt || exempt;
   const me = getMember(currentUser);
 
   // 進捗計算（成長記録）
@@ -10169,7 +10360,7 @@ function renderReportView(){
         <div style="font-size:13px;font-weight:600">${fmtDateJp(ds)}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:1px">担当案件 ${dayCases.length}件</div>
       </div>
-      <span class="rp-status-badge" style="background:${statusColor}">${submitted?'✅ 提出済み':dayCases.length>0?'📝 未提出':'🗓️ 予定なし'}</span>
+      <span class="rp-status-badge" style="background:${statusColor}">${exempt&&!existing?.submittedAt?'🌴 休み':submitted?'✅ 提出済み':dayCases.length>0?'📝 未提出':'🗓️ 予定なし'}</span>
       <div style="display:flex;align-items:center;gap:5px">
         ${(()=>{
           const today2=getTodayStr();
@@ -10177,7 +10368,8 @@ function renderReportView(){
           for(let i=1;i<=30;i++){
             const d2=new Date(); d2.setDate(d2.getDate()-i);
             const pd=`${d2.getFullYear()}-${String(d2.getMonth()+1).padStart(2,'0')}-${String(d2.getDate()).padStart(2,'0')}`;
-            if(cases.some(c=>c.start<=pd&&pd<=c.end&&getAssignees(c).includes(currentUser))&&!getMyReport(pd)) cnt++;
+            // v.149: 「休み」案件の担当日は数えない
+            if(cases.some(c=>c.start<=pd&&pd<=c.end&&getAssignees(c).includes(currentUser))&&!isReportDone(pd, currentUser)) cnt++;
           }
           return cnt>0?`<span style="background:#EF4444;color:#fff;border-radius:99px;padding:2px 8px;font-size:10px;font-weight:700">⚠️ ${cnt}日未提出</span>`:'';
         })()}
