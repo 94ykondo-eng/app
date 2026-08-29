@@ -1860,7 +1860,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.155';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.156';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -5176,6 +5176,13 @@ function generatePdf(){
   area.innerHTML = html;
   closePdfModal();
 
+  // v.156: プレビュー用にスタイルと本文を分ける。
+  //   ★従来はプレビュー側で <style> を捨てていたため、罫線・色分けが一切効かず
+  //     素のテキストが並ぶだけになっていた（印刷結果とも食い違う）。
+  const _m = html.match(/<style>[\s\S]*?<\/style>/);
+  const pdfStyle = _m ? _m[0] : '';
+  const pdfBody  = html.replace(/<style>[\s\S]*?<\/style>/, '');
+
   // 別ウィンドウでプレビュー表示
   const previewWin = window.open('', '_blank', 'width=900,height=700,scrollbars=yes');
   if(!previewWin){ alert('ポップアップがブロックされました。ブラウザのポップアップ許可設定を確認してください。'); return; }
@@ -5185,6 +5192,7 @@ function generatePdf(){
 <head>
   <meta charset="UTF-8">
   <title>日報プレビュー</title>
+  ${pdfStyle}
   <style>
     body{margin:0;font-family:'Hiragino Sans','Meiryo',sans-serif}
     .preview-toolbar{
@@ -5201,11 +5209,14 @@ function generatePdf(){
     .preview-btn-close:hover{background:#374151}
     .preview-body{margin-top:52px;padding:20px;background:#e5e7eb;min-height:calc(100vh - 52px)}
     .preview-page{background:#fff;max-width:800px;margin:0 auto 20px;box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:4px;overflow:hidden}
+    /* v.156: 本文の各ページを紙らしく見せる（印刷時は下の @media print で解除） */
+    .preview-body .pdf-page{background:#fff;margin:0 auto 20px;box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:4px}
     @media print{
       .preview-toolbar{display:none}
       .preview-body{margin:0;padding:0;background:none}
       .preview-page{box-shadow:none;margin:0;border-radius:0;page-break-after:always}
       .preview-page:last-child{page-break-after:avoid}
+      .preview-body .pdf-page{box-shadow:none;margin:0;border-radius:0}
     }
   </style>
 </head>
@@ -5216,7 +5227,7 @@ function generatePdf(){
     <button class="preview-btn preview-btn-close" onclick="window.close()">✕ 閉じる</button>
   </div>
   <div class="preview-body">
-    ${html.replace(/<style>[\s\S]*?<\/style>/,'')}
+    ${pdfBody}
   </div>
 </body>
 </html>`);
