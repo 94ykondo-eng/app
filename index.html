@@ -1860,7 +1860,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.153';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.155';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4936,8 +4936,6 @@ function generatePdf(){
     while (d <= last) { out.push(fmtDate(d)); d.setDate(d.getDate() + 1); }
     return out;
   };
-  const DOW = ['日','月','火','水','木','金','土'];
-  const dowOf = ds => DOW[new Date(ds + 'T00:00:00').getDay()];
   // 「休み」案件の名前（「盆休み」等）を拾う。無ければ空。
   const holidayNameOf = (uid, ds) => {
     const c = cases.find(x => {
@@ -4968,19 +4966,27 @@ function generatePdf(){
     .pdf-alert{border:1px solid #FCA5A5;background:#FEF2F2;border-radius:5px;padding:8px 11px;margin-bottom:14px;font-size:11.5px;color:#991B1B}
     .pdf-alert b{font-weight:700}
     .pdf-ok{border:1px solid #A7F3D0;background:#ECFDF5;border-radius:5px;padding:8px 11px;margin-bottom:14px;font-size:11.5px;color:#065F46}
-    .pdf-day{border:1px solid #e5e7eb;border-radius:5px;margin-bottom:9px;page-break-inside:avoid;break-inside:avoid}
-    .pdf-day-hd{display:flex;align-items:baseline;gap:9px;padding:7px 11px;border-bottom:1px solid #f3f4f6;background:#fafafa}
-    .pdf-day-date{font-size:12.5px;font-weight:600}
-    .pdf-day-dow{font-size:10.5px;color:#9ca3af}
-    .pdf-day-time{margin-left:auto;font-size:10.5px;color:#6b7280}
-    .pdf-day-bd{padding:9px 11px}
+    /* v.155: 日ごとに横罫線で区切り、左＝日付／右＝内容の表組みにする */
+    .pdf-days{border-top:1.5px solid #d1d5db;border-bottom:1.5px solid #d1d5db}
+    .pdf-day{display:flex;align-items:stretch;border-bottom:1px solid #e5e7eb;page-break-inside:avoid;break-inside:avoid}
+    .pdf-day:last-child{border-bottom:none}
+    .pdf-day-hd{width:118px;flex-shrink:0;padding:8px 10px 8px 11px;border-right:1px solid #e5e7eb;background:#fafafa}
+    .pdf-day-date{font-size:12px;font-weight:600;display:block;line-height:1.45}
+    .pdf-day-time{display:block;font-size:10px;color:#6b7280;margin-top:3px;line-height:1.5}
+    .pdf-day-bd{flex:1;padding:8px 11px;min-width:0}
     .pdf-badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10px;font-weight:700;letter-spacing:0.04em}
-    .pdf-day.miss{border-color:#FCA5A5}
-    .pdf-day.miss .pdf-day-hd{background:#FEF2F2;border-bottom-color:#FEE2E2}
+    /* 週の変わり目（月曜）は少し太い線で区切る */
+    .pdf-day.wk{border-top:1.5px solid #d1d5db}
+    /* 土日は日付を色分け */
+    .pdf-day.sat .pdf-day-date{color:#2563EB}
+    .pdf-day.sun .pdf-day-date{color:#DC2626}
+    /* 未提出は行全体を赤で示す */
+    .pdf-day.miss .pdf-day-hd{background:#FEF2F2;border-right-color:#FECACA}
     .pdf-day.miss .pdf-day-date{color:#B91C1C}
+    .pdf-day.miss .pdf-day-bd{background:#FFFBFB;border-left:2.5px solid #DC2626;padding-left:9px}
     .pdf-miss-txt{color:#DC2626;font-weight:700;font-size:12px}
-    .pdf-day.off .pdf-day-hd{background:#f9fafb}
-    .pdf-day.off .pdf-day-date{color:#6b7280}
+    .pdf-day.off .pdf-day-hd{background:#f3f4f6}
+    .pdf-day.off .pdf-day-date{color:#9ca3af}
     .pdf-off-txt{color:#6b7280;font-size:11.5px}
     .pdf-case{border-left:2.5px solid #3b82f6;padding:4px 9px;margin-bottom:5px;background:#f9fafb;border-radius:0 4px 4px 0}
     .pdf-case:last-child{margin-bottom:0}
@@ -5059,19 +5065,24 @@ function generatePdf(){
       ? `<div class="pdf-alert"><b>未提出 ${missing.length}日</b>　${missing.map(d=>escHtml(d.slice(5).replace('-','/'))).join('・')}</div>`
       : `<div class="pdf-ok">この期間の日報はすべて提出されています。</div>`;
 
+    html += `<div class="pdf-days">`;
     allDates.forEach(ds=>{
       const r = byDate[ds];
       const submitted = !!(r && (r.submittedAt || r.firstSubmittedAt));
       const exempt = isReportExempt(ds, uid);
-      const cls = submitted ? '' : (exempt ? ' off' : ' miss');
+      let cls = submitted ? '' : (exempt ? ' off' : ' miss');
+      // v.155: 週の変わり目（月曜）と土日を見分けやすくする
+      const dw = new Date(ds + 'T00:00:00').getDay();
+      if(dw === 1) cls += ' wk';
+      if(dw === 6) cls += ' sat';
+      if(dw === 0) cls += ' sun';
 
       html += `<div class="pdf-day${cls}">
         <div class="pdf-day-hd">
-          <span class="pdf-day-date">${fmtDateJp(ds)}</span>
-          <span class="pdf-day-dow">(${dowOf(ds)})</span>`;
+          <span class="pdf-day-date">${fmtDateJp(ds)}</span>`;
 
       if(submitted && incAttendance){
-        html += `<span class="pdf-day-time">出勤 ${normalizeTime(r.startTime)||'——'}　退勤 ${normalizeTime(r.endTime)||'——'}${r.reEditedAt?'　再編集あり':''}</span>`;
+        html += `<span class="pdf-day-time">${normalizeTime(r.startTime)||'——'} 〜 ${normalizeTime(r.endTime)||'——'}${r.reEditedAt?'<br>再編集あり':''}</span>`;
       }
       html += `</div><div class="pdf-day-bd">`;
 
@@ -5112,6 +5123,7 @@ function generatePdf(){
       }
       html += `</div></div>`;
     });
+    html += `</div>`;   // .pdf-days
 
     html += foot(escHtml(member.name)) + `</div>`;
   });
