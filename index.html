@@ -1860,7 +1860,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.150';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.151';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4780,13 +4780,24 @@ function exportReportCSV(){
   const selStaff = [...document.querySelectorAll('.pdf-staff-chk:checked')].map(c=>c.value);
   if(selStaff.length===0){ alert('対象スタッフを選択してください'); return; }
 
+  // v.151: 「出力内容」のチェックをCSVにも反映する（PDFと同じ設定を使う）
+  const incAttendance = document.getElementById('pdf-inc-attendance').checked;
+  const incCases      = document.getElementById('pdf-inc-cases').checked;
+  const incNote       = document.getElementById('pdf-inc-note').checked;
+  const incGrowth     = document.getElementById('pdf-inc-growth').checked;
+  const incSummary    = document.getElementById('pdf-inc-summary').checked;
+
   const DOW = ['日','月','火','水','木','金','土'];
   const dates = (()=>{ const out=[]; let d=new Date(startDs+'T00:00:00');
     const last=new Date(endDs+'T00:00:00');
     while(d<=last){ out.push(fmtDate(d)); d.setDate(d.getDate()+1); } return out; })();
 
-  const head = ['日付','曜日','スタッフ','状態','出勤','退勤','担当案件','特記事項']
-    .concat(GROWTH_FIELDS.map(f=>f.label));
+  // 日付・曜日・スタッフ・状態は「抜けの確認」に必須なので常に出す
+  const head = ['日付','曜日','スタッフ','状態'];
+  if(incAttendance) head.push('出勤','退勤');
+  if(incCases)      head.push('担当案件');
+  if(incNote)       head.push('特記事項');
+  if(incGrowth)     GROWTH_FIELDS.forEach(f=>head.push(f.label));
   const rows = [head];
 
   selStaff.forEach(uid=>{
@@ -4800,25 +4811,54 @@ function exportReportCSV(){
       const submitted = !!(r && (r.submittedAt || r.firstSubmittedAt));
       const exempt = isReportExempt(ds, uid);
       const state = submitted ? '出勤' : (exempt ? '休み' : '未提出');
-      const caseTxt = (submitted && Array.isArray(r.cases))
-        ? r.cases.map(rc=>{
-            const c = cases.find(x=>x.id===rc.caseId);
-            return (c?.name||rc.caseId) + '(' + (rc.status||'') + ')';
-          }).join('／')
-        : '';
-      const row = [
-        ds, DOW[new Date(ds+'T00:00:00').getDay()], m.name, state,
-        submitted ? (normalizeTime(r.startTime)||'') : '',
-        submitted ? (normalizeTime(r.endTime)||'')   : '',
-        caseTxt,
-        submitted ? (r.note||'') : '',
-      ];
-      GROWTH_FIELDS.forEach(f=>{
+      const row = [ds, DOW[new Date(ds+'T00:00:00').getDay()], m.name, state];
+
+      if(incAttendance){
+        row.push(submitted ? (normalizeTime(r.startTime)||'') : '');
+        row.push(submitted ? (normalizeTime(r.endTime)||'')   : '');
+      }
+      if(incCases){
+        row.push((submitted && Array.isArray(r.cases))
+          ? r.cases.map(rc=>{
+              const c = cases.find(x=>x.id===rc.caseId);
+              return (c?.name||rc.caseId) + '(' + (rc.status||'') + ')';
+            }).join('／')
+          : '');
+      }
+      if(incNote)   row.push(submitted ? (r.note||'') : '');
+      if(incGrowth) GROWTH_FIELDS.forEach(f=>{
         row.push(submitted && r.growth ? (r.growth[f.key]||'') : '');
       });
       rows.push(row);
     });
   });
+
+  // 月次勤怠サマリー（PDFと同じ集計を、CSVでは末尾に別ブロックとして付ける）
+  if(incSummary){
+    rows.push([]);
+    rows.push(['勤怠サマリー', fmtDateJp(startDs)+' 〜 '+fmtDateJp(endDs)]);
+    rows.push(['スタッフ','提出','休み','未提出','平均出勤','未提出日']);
+    selStaff.forEach(uid=>{
+      const m = getMember(uid); if(!m) return;
+      const rpts = DAILY_REPORTS.filter(r=>r.user===uid&&r.date>=startDs&&r.date<=endDs);
+      const submitted = rpts.filter(r=>r.submittedAt||r.firstSubmittedAt).length;
+      const offList  = dates.filter(d=>!rpts.some(r=>r.date===d) && isReportExempt(d, uid));
+      const missList = dates.filter(d=>{
+        const r = rpts.find(x=>x.date===d);
+        if(r && (r.submittedAt||r.firstSubmittedAt)) return false;
+        return !isReportExempt(d, uid);
+      });
+      const startTimes = rpts.filter(r=>r.startTime).map(r=>{
+        const t=normalizeTime(r.startTime);
+        const [h,min]=t.split(':').map(Number); return h*60+min;
+      });
+      const avgStart = startTimes.length>0
+        ? `${String(Math.floor(startTimes.reduce((a,b)=>a+b,0)/startTimes.length/60)).padStart(2,'0')}:${String(Math.round(startTimes.reduce((a,b)=>a+b,0)/startTimes.length%60)).padStart(2,'0')}`
+        : '';
+      rows.push([m.name, submitted+'日', offList.length+'日', missList.length+'日', avgStart,
+                 missList.map(d=>d.slice(5).replace('-','/')).join('・')]);
+    });
+  }
 
   const csv = rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
   const now = new Date();
