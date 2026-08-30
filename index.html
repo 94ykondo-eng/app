@@ -1860,7 +1860,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.156';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.157';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4789,6 +4789,40 @@ function monthGoalsForRange(startDs, endDs, staffIds){
   });
   return out;
 }
+// v.157: 期間内の「週ごとの行動目標」を集める。
+//   週は月曜はじまり。その週に提出された日報のうち、weekGoal が入っている最初のものを採る。
+//   ★同じ目標が翌週も続いている場合は、直前の週と同じ内容ならまとめずに週ごとに出す
+//     （いつ立てた目標かが分かる方が振り返りやすいため）。
+//   戻り値: [{ from:'YYYY-MM-DD', to:'YYYY-MM-DD', goal:'…' }, ...]
+function weekGoalsForRange(startDs, endDs, staffIds){
+  const monday = ds => {
+    const d = new Date(ds + 'T00:00:00');
+    const w = d.getDay();                 // 0=日
+    d.setDate(d.getDate() - ((w + 6) % 7));  // 月曜へ寄せる
+    return fmtDate(d);
+  };
+  const rows = DAILY_REPORTS
+    .filter(r => (!staffIds || staffIds.indexOf(String(r.user)) >= 0)
+              && String(r.date||'') >= startDs && String(r.date||'') <= endDs
+              && (r.submittedAt || r.firstSubmittedAt)
+              && r.growth && String(r.growth.weekGoal||'').trim())
+    .sort((a,b) => String(a.date).localeCompare(String(b.date)));
+
+  const byWeek = {};
+  rows.forEach(r => {
+    const k = monday(r.date);
+    if(!byWeek[k]) byWeek[k] = { from:r.date, to:r.date, goal:String(r.growth.weekGoal).trim() };
+    else if(r.date > byWeek[k].to) byWeek[k].to = r.date;
+  });
+  return Object.keys(byWeek).sort().map(k => byWeek[k]);
+}
+// 'YYYY-MM-DD' を「7/1（水）」にする
+function mdLabel(ds){
+  const d = new Date(ds + 'T00:00:00');
+  const dows = ['日','月','火','水','木','金','土'];
+  return `${d.getMonth()+1}/${d.getDate()}（${dows[d.getDay()]}）`;
+}
+
 // 'YYYY-MM' を「2026年8月」にする
 function ymLabel(ym){
   const [y, m] = String(ym).split('-');
@@ -4963,6 +4997,13 @@ function generatePdf(){
     .pdf-goal-lb{font-size:10px;font-weight:700;color:#0369A1;letter-spacing:0.08em;margin-bottom:3px}
     .pdf-goal-tx{font-size:12px;font-weight:600;color:#0C4A6E;white-space:pre-wrap;line-height:1.6}
     .pdf-goal-dt{font-size:10.5px;color:#0369A1;white-space:pre-wrap;line-height:1.6;margin-top:4px;padding-top:4px;border-top:1px dashed #BAE6FD}
+    /* v.157: 週の行動目標 */
+    .pdf-wk{border:1px solid #E5E7EB;border-radius:5px;padding:9px 12px;margin-bottom:12px;page-break-inside:avoid;break-inside:avoid}
+    .pdf-wk-lb{font-size:10px;font-weight:700;color:#6b7280;letter-spacing:0.08em;margin-bottom:5px}
+    .pdf-wk-row{display:flex;gap:10px;padding:4px 0;border-top:1px dashed #eef0f2;font-size:11.5px;line-height:1.6}
+    .pdf-wk-row:first-of-type{border-top:none}
+    .pdf-wk-span{width:118px;flex-shrink:0;color:#6b7280;font-size:10.5px}
+    .pdf-wk-goal{flex:1;white-space:pre-wrap;min-width:0}
     .pdf-alert{border:1px solid #FCA5A5;background:#FEF2F2;border-radius:5px;padding:8px 11px;margin-bottom:14px;font-size:11.5px;color:#991B1B}
     .pdf-alert b{font-weight:700}
     .pdf-ok{border:1px solid #A7F3D0;background:#ECFDF5;border-radius:5px;padding:8px 11px;margin-bottom:14px;font-size:11.5px;color:#065F46}
@@ -5060,6 +5101,20 @@ function generatePdf(){
         ${g.detail?`<div class="pdf-goal-dt">${escHtml(g.detail)}</div>`:''}
       </div>`;
     });
+
+    // v.157: その人が立てた週の行動目標をまとめて出す
+    const wkGoals = weekGoalsForRange(startDs, endDs, [uid]);
+    if(wkGoals.length > 0){
+      html += `<div class="pdf-wk"><div class="pdf-wk-lb">週の行動目標</div>`;
+      wkGoals.forEach(g=>{
+        const span = (g.from === g.to) ? mdLabel(g.from) : `${mdLabel(g.from)} 〜 ${mdLabel(g.to)}`;
+        html += `<div class="pdf-wk-row">
+          <span class="pdf-wk-span">${escHtml(span)}</span>
+          <span class="pdf-wk-goal">${escHtml(g.goal)}</span>
+        </div>`;
+      });
+      html += `</div>`;
+    }
 
     html += missing.length
       ? `<div class="pdf-alert"><b>未提出 ${missing.length}日</b>　${missing.map(d=>escHtml(d.slice(5).replace('-','/'))).join('・')}</div>`
