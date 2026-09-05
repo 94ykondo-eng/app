@@ -1349,6 +1349,14 @@
                 <input class="pf-input" id="ap-end" type="date">
               </div>
             </div>
+            <!-- v.158: 夜勤。ONにするとカレンダーの帯だけ翌日まで伸びる（end は変えない） -->
+            <div class="pf-row" id="ap-night-row" style="margin-top:8px"><label class="pf-label">夜勤</label>
+              <span class="pf-val" id="view-night" style="display:none"></span>
+              <label id="ap-night-label" style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);min-height:34px;box-sizing:border-box">
+                <input type="checkbox" id="ap-night" style="width:16px;height:16px;flex-shrink:0;margin:0;cursor:pointer">
+                <span>🌙 夜勤（翌朝まで）<span style="color:var(--text-muted);font-size:11px">／カレンダーは翌日まで表示</span></span>
+              </label>
+            </div>
             <div class="pf-row" style="margin-top:10px"><label class="pf-label">担当者</label>
               <span class="pf-val" id="view-assignee" style="display:none"></span>
               <div id="ap-assignee" style="border:1px solid var(--border);border-radius:var(--radius);padding:5px 8px;background:var(--bg);max-height:110px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>
@@ -1860,7 +1868,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.157';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.158';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2180,6 +2188,7 @@ function apAddCase(){
     barColor:pfBarColor,
     start:document.getElementById('ap-start').value,
     end:document.getElementById('ap-end').value,
+    nightShift:!!document.getElementById('ap-night')?.checked,   // v.158
     status:document.getElementById('ap-status').value,
     est:parseInt(document.getElementById('ap-est').value)||0,
     memo:document.getElementById('ap-memo')?.value||'',warn:false,comments:[],
@@ -2293,7 +2302,8 @@ function handleDayTap(ds, t, fromTouch){
   // バー・オーバーレイ・メモ帯のタップは各自のハンドラに任せる
   // （.event-bar-spacer は段揃え用の見えない詰め物で独自ハンドラを持たないため、余白と同じく新規追加へ進める）
   if(t && (t.closest('.event-bar')||t.closest('.band-overlay-bar')||t.closest('.cal-memo'))) return;
-  const dayCases = (typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=ds&&ds<=c.end);
+  // v.158: 夜勤で伸びた翌日も「帯が見えている日」なので一覧に含める（表示合わせ）
+  const dayCases = (typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=ds&&ds<=caseDispEnd(c));
   if(fromTouch){
     // モバイル(タッチ)：案件が1件以上ある日はポップアップで選ばせる（v.79仕様）
     if(dayCases.length>=1){ showDayPopup(ds, dayCases); return; }
@@ -2324,7 +2334,9 @@ function openCaseFromBar(caseId, ds, ev){
     const p=(ev.changedTouches&&ev.changedTouches[0])||(ev.touches&&ev.touches[0])||ev;
     if(p && typeof p.clientX==='number'){ const d=dateAtPoint(p.clientX,p.clientY); if(d) day=d; }
   }
-  const list=(typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=day&&day<=c.end);
+  // v.158: 夜勤で伸びた翌日をタップした場合、実期間だけで絞るとタップした当の案件が
+  //   一覧から漏れる（＝タップしても開けない）。表示上の終了日で絞る。
+  const list=(typeof visibleCases!=='undefined'?visibleCases:[]).filter(c=>c.start<=day&&day<=caseDispEnd(c));
   if(list.length>=1){ showDayPopup(day, list); return; }
   openDetail(caseId, day);          // 一覧が作れないときだけ従来どおり詳細へ
 }
@@ -2429,6 +2441,21 @@ function addDaysStr(ds,n){
 }
 function diffDaysStr(a,b){
   return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000);
+}
+// v.158: 夜勤（翌朝まで）の案件は、カレンダー上の帯だけ1日ぶん右へ伸ばす。
+//   ★これは表示専用。c.end 自体は絶対に変えない。
+//     日報の担当日・未提出判定／日ごとの工数(estDaily)／協力業者の人工／諸経費／
+//     請求書・注文書／勤怠／.ics は、すべて従来どおり c.start〜c.end で数える。
+//     （伸ばした翌日は「見えているだけの日」であり、担当日ではない）
+//   使ってよい場所: renderCal の帯配置・renderBandOverlay・その日の案件一覧ポップアップ。
+const _dispEndMemo=new Map();   // 終了日文字列 → 翌日（同じ日付の再計算を避ける）
+function caseDispEnd(c){
+  if(!c) return '';
+  const e=c.end||c.start||'';
+  if(!e || !c.nightShift) return e;
+  let v=_dispEndMemo.get(e);
+  if(v===undefined){ v=addDaysStr(e,1); _dispEndMemo.set(e,v); }
+  return v;
 }
 function dateAtPoint(x,y){
   let found=null;
@@ -3419,6 +3446,9 @@ function parseCases(data){
     address:  c.address  || '',
     start:    normalizeDate(c.start),
     end:      normalizeDate(c.end),
+    // v.158: 夜勤フラグ。カレンダーの帯だけ翌日まで伸ばすための表示用フラグ。
+    //   ★parseCases はホワイトリスト方式なので、ここに書かないとGASから来た値が落ちる。
+    nightShift: c.nightShift===true || c.nightShift==='true' || c.nightShift==='TRUE',
     assignee: c.assignee || '',
     assignees: Array.isArray(c.assignees)?c.assignees.filter(Boolean):(c.assignees?(()=>{try{const p=JSON.parse(c.assignees);return Array.isArray(p)?p.filter(Boolean):[c.assignee||''].filter(Boolean);}catch(e){return [c.assignee||''].filter(Boolean);}})():[c.assignee||''].filter(Boolean)),
     barColor: c.barColor || '',
@@ -3972,7 +4002,7 @@ async function saveCase_GAS(c, op){
   } : {};
   await gasPost({ action:'saveCase', ..._op, case:{
     id: String(c.id), name: c.name, client: c.client, clientAbbr: c.clientAbbr||'', contact: c.contact,
-    address: c.address, start: c.start, end: c.end, assignee: c.assignee,
+    address: c.address, start: c.start, end: c.end, nightShift: !!c.nightShift, assignee: c.assignee,
     assignees: JSON.stringify(c.assignees||[c.assignee||''].filter(Boolean)),
     barColor: c.barColor||'',
     status: c.status, est: c.est, estDaily: JSON.stringify(c.estDaily||{}), memo: c.memo, warn: c.warn,
@@ -5865,6 +5895,7 @@ function closeAddPanel(){
   ['ap-name','ap-client','ap-client-abbr','ap-contact','ap-address','ap-start','ap-end','ap-memo','ap-est'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
+  { const _nt=document.getElementById('ap-night'); if(_nt) _nt.checked=false; }   // v.158
 }
 
 function showPanelCloseBtn(){
@@ -6493,7 +6524,8 @@ function renderCal(){
   // 帯レイアウト: 案件ごとに1つのrowを割り当て（週をまたいでも同じrow＝1本のまっすぐな帯）
   const caseRow={};   // caseId → row番号
   const _dayNum=ds=>{ const [y,m,d]=String(ds||'').split('-').map(Number); return (y||0)*10000+(m||0)*100+(d||0); };
-  const _span=c=>{ return _dayNum(c.end)-_dayNum(c.start); }; // 期間（長いほど大きい）
+  // v.158: 段割り・帯の描画はすべて「表示上の終了日」で行う（夜勤は翌日まで伸びる）
+  const _span=c=>{ return _dayNum(caseDispEnd(c))-_dayNum(c.start); }; // 期間（長いほど大きい）
   const _byStart=(a,b)=> a.start<b.start?-1:a.start>b.start?1:0;
   // 既定順（従来どおり span 降順）。後段の cellCases / 協予約(v.107) はこの順で回す（順序非依存だが従来を踏襲）
   const sorted=[...visibleCases].sort((a,b)=>{ const d=_span(b)-_span(a); return d||_byStart(a,b); });
@@ -6505,7 +6537,8 @@ function renderCal(){
   //   重なる2帯は数学的に片側へ必ず1つ空きが残るが、3本以上が絡む配置では順序で空きを削減できる。
   const _rangeCache=new Map();
   visibleCases.forEach(c=>{
-    const l=cells.map((cell,i)=>(cell.ds&&cell.ds>=c.start&&cell.ds<=c.end)?i:-1).filter(i=>i>=0);
+    const _de=caseDispEnd(c);
+    const l=cells.map((cell,i)=>(cell.ds&&cell.ds>=c.start&&cell.ds<=_de)?i:-1).filter(i=>i>=0);
     _rangeCache.set(c.id, l.length?[Math.min(...l),Math.max(...l)]:null);
   });
   const _assignByOrder=order=>{
@@ -6540,8 +6573,9 @@ function renderCal(){
   const cellCases={};
   cells.forEach((_,i)=>{ cellCases[i]=[]; });
   sorted.forEach(c=>{
+    const _de=caseDispEnd(c);
     cells.forEach((cell,i)=>{
-      if(cell.ds&&cell.ds>=c.start&&cell.ds<=c.end) cellCases[i].push(c);
+      if(cell.ds&&cell.ds>=c.start&&cell.ds<=_de) cellCases[i].push(c);
     });
   });
 
@@ -6567,9 +6601,10 @@ function renderCal(){
   // (2) 複数日帯を「週内の連続セル run」＝セグメントに分割
   const bandSegs = [];                      // {cells:[idx...], rB}
   sorted.forEach(c=>{
-    if(c.start===c.end) return;             // 帯（複数日）のみ
+    const _de=caseDispEnd(c);
+    if(c.start===_de) return;               // 帯（複数日）のみ。v.158: 夜勤は単日でも帯になる
     const rB = caseRow[c.id]||0;
-    const present = cells.map((cell,i)=> (cell.ds && cell.ds>=c.start && cell.ds<=c.end)?i:-1).filter(i=>i>=0);
+    const present = cells.map((cell,i)=> (cell.ds && cell.ds>=c.start && cell.ds<=_de)?i:-1).filter(i=>i>=0);
     let run=[];
     const flush=()=>{ if(run.length){ bandSegs.push({cells:run.slice(), rB}); run=[]; } };
     present.forEach(i=>{
@@ -6632,9 +6667,10 @@ function renderCal(){
       }
 
       const m=getMember(primaryAssignee(c));
+      const _de=caseDispEnd(c);            // v.158: 夜勤は翌日まで（表示専用）
       const isStart=cell.ds===c.start;
-      const isEnd=cell.ds===c.end;
-      const isMulti=c.start!==c.end;
+      const isEnd=cell.ds===_de;
+      const isMulti=c.start!==_de;
       const col=cell.col;
       const isWeekStart=col===0;
       const isWeekEnd=col===6;
@@ -6655,7 +6691,7 @@ function renderCal(){
       let _showName = !isMulti || visualStart;
       if(isMulti && !_showName){
         const prevCell = (col>0) ? cells[idx-1] : null; // 同じ週の左隣セル
-        const prevHasCase = prevCell && prevCell.ds && prevCell.ds>=c.start && prevCell.ds<=c.end;
+        const prevHasCase = prevCell && prevCell.ds && prevCell.ds>=c.start && prevCell.ds<=_de;
         // 前日にこの案件があれば帯は繋がっている→名前不要。無ければ分断→名前表示
         if(!prevHasCase) _showName = true;
       }
@@ -6689,6 +6725,7 @@ function renderCal(){
         bar.innerHTML=
           _avatars
           +`<span class="status-dot-cal" style="background:${dotColor};flex-shrink:0;margin-left:2px"></span>`
+          +(c.nightShift?`<span style="flex-shrink:0" title="夜勤（翌朝まで）">🌙</span>`:'')   // v.158: 通常ここは通らない（夜勤は必ず帯）が保険
           +`<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(c.clientAbbr||c.client&&c.client!=='未設定')?escHtml(c.clientAbbr||c.client)+' ':''}<span style="opacity:0.75">${c.name}</span></span>`;
       }
 
@@ -6838,7 +6875,8 @@ function renderBandOverlay(){
   Object.entries(byCase).forEach(([cid, items])=>{
     const c=cases.find(x=>String(x.id)===String(cid));
     if(!c) return;
-    const isMulti=c.start!==c.end;
+    const _de=caseDispEnd(c);              // v.158: 夜勤は翌日まで（表示専用）
+    const isMulti=c.start!==_de;
     if(!isMulti) return; // 1日案件はセル内バーで処理済み
 
     const bg=caseBarBg(c,'59');   // v.109: 複数日帯は少し濃く(35%)。継続セルが空欄に見える問題を解消
@@ -6862,7 +6900,7 @@ function renderBandOverlay(){
       const startCol=firstCell.col;
       const spanCols=lastCell.col-startCol+1;
       const isStart=firstCell.ds===c.start;
-      const isEnd=lastCell.ds===c.end;
+      const isEnd=lastCell.ds===_de;
       const isWeekStart=startCol===0;
       const isWeekEnd=lastCell.col===6;
 
@@ -6921,6 +6959,7 @@ function renderBandOverlay(){
         band.innerHTML=
           buildBarAvatars(_nonVendors,_hasVendor)
           +`<span class="status-dot-cal" style="background:${dotColor};flex-shrink:0;margin-left:2px"></span>`
+          +(c.nightShift?`<span style="flex-shrink:0" title="夜勤（翌朝まで）">🌙</span>`:'')   // v.158
           +`<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(c.clientAbbr||c.client&&c.client!=='未設定')?escHtml(c.clientAbbr||c.client)+' ':''}<span style="opacity:0.75">${c.name}</span></span>`;
       } else {
         band.innerHTML='&nbsp;';
@@ -7375,6 +7414,14 @@ function showViewFields(c){
   setView('view-address', _mapIcon + escHtml(_addr));
   setView('view-start', escHtml(c.start));
   setView('view-end', escHtml(c.end));
+  // v.158: 夜勤。詳細表示ではチェックボックスを隠し、夜勤の案件だけ行を出す
+  //   （全案件に「なし」を出すと画面が煩雑になるため）
+  {
+    const _nl=document.getElementById('ap-night-label'); if(_nl) _nl.style.display='none';
+    const _nr=document.getElementById('ap-night-row');
+    if(c.nightShift){ if(_nr) _nr.style.display=''; setView('view-night','🌙 夜勤（翌朝まで）'); }
+    else { if(_nr) _nr.style.display='none'; }
+  }
   setView('view-assignee', (()=>{
     const ids=getAssignees(c);
     const vendorIds=new Set(MEMBERS.filter(m=>m.role==='vendor').map(m=>String(m.id||'')));
@@ -7454,6 +7501,12 @@ function showInputFields(){
   ['ap-name','ap-client','ap-client-abbr','ap-contact','ap-address','ap-start','ap-end','ap-status'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.style.display='';
   });
+  // v.158: 夜勤。編集/新規では行とチェックボックスを必ず出し、view側は隠す
+  {
+    const _nr=document.getElementById('ap-night-row');   if(_nr) _nr.style.display='';
+    const _nl=document.getElementById('ap-night-label'); if(_nl) _nl.style.display='flex';
+    const _nv=document.getElementById('view-night');     if(_nv) _nv.style.display='none';
+  }
   const apAss2=document.getElementById('ap-assignee'); if(apAss2) apAss2.style.display='';
   const _abbrRow2=document.getElementById('ap-client-abbr-row'); if(_abbrRow2) _abbrRow2.style.display='';
   // 請求状況
@@ -7471,7 +7524,7 @@ function showInputFields(){
   document.getElementById('ap-date-hint').style.display='block';
   // 権限なし → フィールドを読み取り専用に
   const noEdit = !canAdd();
-  ['ap-name','ap-client','ap-contact','ap-address','ap-start','ap-end',
+  ['ap-name','ap-client','ap-contact','ap-address','ap-start','ap-end','ap-night',
    'ap-status','ap-est','ap-memo'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=noEdit;
   });
@@ -7532,6 +7585,7 @@ function showNewMode(showPanel=false){
   ['ap-name','ap-client','ap-client-abbr','ap-contact','ap-address','ap-start','ap-end','ap-est','ap-memo'].forEach(id=>{
     const el=document.getElementById(id); if(el){ el.value=''; if(el.tagName==='TEXTAREA') autoResize(el); }
   });
+  { const _nt=document.getElementById('ap-night'); if(_nt) _nt.checked=false; }   // v.158
   const apStatus=document.getElementById('ap-status'); if(apStatus) apStatus.value='未対応';
 
   highlightRange('','');
@@ -7630,6 +7684,7 @@ function openDetail(id, date){
   document.getElementById('ap-address').value =c.address||'';
   document.getElementById('ap-start').value   =c.start;
   document.getElementById('ap-end').value     =c.end;
+  { const _nt=document.getElementById('ap-night'); if(_nt) _nt.checked=!!c.nightShift; }   // v.158
   renderAssigneeChecks(getAssignees(c).map(String));
   pfBarColor=c.barColor||'';
   const _bcRow=document.getElementById('ap-barcolor-row'); if(_bcRow) _bcRow.style.display='none';
@@ -7758,6 +7813,7 @@ function pfSaveCase(){
   c.address  =document.getElementById('ap-address').value||'未設定';
   c.start    =document.getElementById('ap-start').value;
   c.end      =document.getElementById('ap-end').value;
+  c.nightShift=!!document.getElementById('ap-night')?.checked;   // v.158
   // assigneesが空の場合は既存を維持（renderCalフィルタで消える防止）
   const newAssignees=collectAssignees();
   c.assignee =newAssignees[0]||c.assignee||'';
