@@ -1868,7 +1868,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.159';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.160';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -3162,10 +3162,17 @@ function renderSyncStamp(){
   }
 }
 // v.144: 手動同期。結果をその場に出す（押しても何も起きない状態をなくす）
+// v.160: 件数は「全件数」ではなく「この同期で新しく入ってきた案件の数」を出す。
+//   同期前のIDを控え、同期後に無かったIDを数える。他端末で追加された案件だけが数えられ、
+//   自分の端末で追加済みの案件（同期前から cases にある）は数えない。
 async function manualSync(){
   const before = _lastSyncOkAt;
+  const idsBefore = new Set(cases.map(c=>String(c.id)));
   await reloadFromGAS();
-  if(_lastSyncOkAt > before) showToast('\u2705 \u6700\u65b0\u3092\u53d6\u5f97\u3057\u307e\u3057\u305f\uff08\u6848\u4ef6' + cases.length + '\u4ef6\uff09');
+  if(_lastSyncOkAt > before){
+    const added = cases.filter(c=>!idsBefore.has(String(c.id))).length;
+    showToast('\u2705 \u6700\u65b0\u3092\u53d6\u5f97\u3057\u307e\u3057\u305f\uff08' + (added>0 ? '\u65b0\u3057\u3044\u6848\u4ef6 ' + added + '\u4ef6' : '\u65b0\u3057\u3044\u6848\u4ef6\u306f\u3042\u308a\u307e\u305b\u3093') + '\uff09');
+  }
   else showToast('\u26a0\ufe0f \u53d6\u5f97\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002\u96fb\u6ce2\u72b6\u614b\u3092\u78ba\u8a8d\u3057\u3066\u3082\u3046\u4e00\u5ea6\u304a\u8a66\u3057\u304f\u3060\u3055\u3044');
 }
 function showSyncStaleWarning(n){
