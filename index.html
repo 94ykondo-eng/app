@@ -1491,9 +1491,9 @@
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">見積金額は「税抜」として扱い、消費税10%・税込を自動計算します（顧客ごと・日付昇順）</div>
       <div class="period-filter" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
-        <button class="pf-btn active" id="bf-all" onclick="setBillingPeriod('all',this)">すべて</button>
+        <button class="pf-btn" id="bf-all" onclick="setBillingPeriod('all',this)">すべて</button>
         <button class="pf-btn" id="bf-this" onclick="setBillingPeriod('this',this)">今月</button>
-        <button class="pf-btn" id="bf-last" onclick="setBillingPeriod('last',this)">先月</button>
+        <button class="pf-btn active" id="bf-last" onclick="setBillingPeriod('last',this)">先月</button>
         <button class="pf-btn" id="bf-custom" onclick="setBillingPeriod('custom',this)">期間指定</button>
         <span id="bf-range" style="display:none;align-items:center;gap:4px;font-size:12px">
           <input type="date" id="bf-start" onchange="renderBilling()" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px">
@@ -1513,9 +1513,9 @@
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">支払金額は「税抜」として扱い、消費税10%・税込を自動計算します（協力業者ごと・日付昇順）</div>
       <div class="period-filter" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
-        <button class="pf-btn active" id="of-all" onclick="setOrderPeriod('all',this)">すべて</button>
+        <button class="pf-btn" id="of-all" onclick="setOrderPeriod('all',this)">すべて</button>
         <button class="pf-btn" id="of-this" onclick="setOrderPeriod('this',this)">今月</button>
-        <button class="pf-btn" id="of-last" onclick="setOrderPeriod('last',this)">先月</button>
+        <button class="pf-btn active" id="of-last" onclick="setOrderPeriod('last',this)">先月</button>
         <button class="pf-btn" id="of-custom" onclick="setOrderPeriod('custom',this)">期間指定</button>
         <span id="of-range" style="display:none;align-items:center;gap:4px;font-size:12px">
           <input type="date" id="of-start" onchange="renderOrder()" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px">
@@ -1868,7 +1868,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.158';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.159';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -7942,8 +7942,10 @@ function switchView(v,btn){
   if(v==='daily'){ renderMiniCal(); renderDaily(); _syncOnDaily(); }
   if(v==='report'){ renderReportMiniCal(); renderReportView(); }
   if(v==='members'){ renderMembers(); if(isAdmin()) renderStampManager(); }
-  if(v==='billing'){ renderBilling(); }
-  if(v==='order'){ renderOrder(); }
+  // v.159: 請求書発行・注文書発行は開くたびに「先月」へ戻す（初期表示の要望）。
+  //   setXxxPeriod が中で renderXxx() を呼ぶので、ここで別途 render は要らない。
+  if(v==='billing'){ setBillingPeriod('last', document.getElementById('bf-last')); }
+  if(v==='order'){ setOrderPeriod('last', document.getElementById('of-last')); }
   if(v==='log'){ renderLog(); }
   if(v==='cabinet'){ renderCabinet(); }
   if(v==='kintai'){ renderKintai(); kintaiLoadAllowances(); }
@@ -8515,8 +8517,8 @@ function parseEst(v){
 }
 // 案件→請求行（税抜・消費税10%切り捨て・税込）
 // 期間フィルター状態
-let billingPeriod={mode:'all',start:'',end:''};
-let orderPeriod={mode:'all',start:'',end:''};
+let billingPeriod={mode:'last',start:'',end:''};   // v.159: 初期表示は「先月」
+let orderPeriod={mode:'last',start:'',end:''};     // v.159: 初期表示は「先月」
 // 期間の開始・終了日を計算
 function getPeriodRange(p){
   if(p.mode==='all') return null;
