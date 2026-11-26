@@ -362,7 +362,8 @@
   .cal-month{font-size:18px;font-weight:700}
   .today-btn{border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--text-muted)}
   .today-btn:hover{background:var(--bg)}
-  .cal-grid{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
+  /* v.163: A案（くっきり業務用）— 曜日行は濃色、土日祝は列ごとに淡色、他月はグレー地、今日は青枠 */
+  .cal-grid{background:var(--surface);border:1px solid #CFCBC2;border-radius:6px;overflow:hidden;display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
   .cal-day.selectable:hover{background:#EEF3FD;cursor:pointer}
   .cal-day.drag-start{background:#DBEAFE !important;cursor:cell}
   .cal-day.drop-hint{background:#D1FAE5 !important}
@@ -372,32 +373,37 @@
   .cal-day.range-start.range-end{border-radius:6px}
   .ap-date-hint{font-size:11px;color:var(--accent);background:#EEF3FD;border-radius:5px;padding:4px 8px;text-align:center;display:none}
   .ap-date-hint.show{display:block}
-  .cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--border)}
-  .cal-wd{padding:8px 4px;text-align:center;font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:0.04em}
-  .cal-wd.sun{color:#EF4444}.cal-wd.sat{color:#3B82F6}
+  .cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);background:#2F3640;border-bottom:none}
+  .cal-wd{padding:9px 4px;text-align:center;font-size:12px;font-weight:600;color:#E5E7EB;letter-spacing:0.1em}
+  .cal-wd.sun{color:#FCA5A5}.cal-wd.sat{color:#93C5FD}
   .cal-days{display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(6,minmax(0,1fr));flex:1;min-height:0;overflow:hidden;height:0;position:relative}
   /* v.120: モバイル横スワイプ月移動のスライド演出（changeMonthAnimated が付与） */
   .cal-days.cal-anim{transition:transform .22s ease, opacity .22s ease;will-change:transform,opacity}
   @media (prefers-reduced-motion: reduce){ .cal-days.cal-anim{transition:none} }
-  .cal-day{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:4px 0 2px;overflow:hidden;display:flex;flex-direction:column;min-height:0;position:relative}
+  .cal-day{border-right:1px solid #D6D2C8;border-bottom:1px solid #D6D2C8;padding:4px 0 2px;overflow:hidden;display:flex;flex-direction:column;min-height:0;position:relative}
+  .cal-day.sat{background:#F3F7FD}.cal-day.sun,.cal-day.holiday{background:#FDF3F3}
+  .cal-day.other-month{background:#F7F6F2}
+  .cal-day.today{box-shadow:inset 0 0 0 2px var(--accent)}
+  .day-holiday{font-size:9px;color:#EF4444;line-height:22px;margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
   .cal-day:nth-child(7n){border-right:none}
   .cal-day.other-clickable{cursor:pointer}
   .cal-day.other-clickable:hover{background:rgba(0,0,0,0.02)}
   .cal-day.today .day-num{background:var(--accent);color:#fff;border-radius:50%}
-  .day-num{width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;margin-bottom:2px;flex-shrink:0;margin-left:4px}
-  .cal-day.sun .day-num{color:#EF4444}.cal-day.sat .day-num{color:#3B82F6}
-  .cal-day.today.sun .day-num,.cal-day.today.sat .day-num{color:#fff}
+  .day-num{width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;margin-bottom:2px;flex-shrink:0;margin-left:6px;margin-top:2px}
+  .cal-day.sun .day-num,.cal-day.holiday .day-num{color:#EF4444}.cal-day.sat .day-num{color:#3B82F6}
+  .cal-day.today.sun .day-num,.cal-day.today.sat .day-num,.cal-day.today.holiday .day-num{color:#fff}
   /* 前月・翌月セルは薄く（土日も含めて区別） */
   .cal-day.other-month .day-num{color:#C8C6C0 !important}
   .cal-day.other-month .day-wx{opacity:0.55}
-  .cal-day.other-month.sun .day-num{color:#F6B9B9 !important}
+  .cal-day.other-month.sun .day-num,.cal-day.other-month.holiday .day-num{color:#F6B9B9 !important}
+  .cal-day.other-month .day-holiday{color:#F6B9B9}
   .cal-day.other-month.sat .day-num{color:#B3CDF5 !important}
   .day-head{display:flex;align-items:center;gap:4px;flex-shrink:0;margin-bottom:2px}
   .day-wx{display:flex;align-items:center;gap:2px;line-height:1}
   .day-wx .wx-emoji{font-size:12px}
   .day-wx .wx-pop{font-size:10px;color:#7A7870}
   .day-wx .wx-pop.hi{color:#185FA5;font-weight:600}
-  .event-bar{border-radius:3px;padding:1px 4px;font-size:9px;font-weight:500;margin-bottom:1px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.1s;display:flex;align-items:center;gap:3px;flex-shrink:0;min-height:12px;max-height:12px;line-height:12px;box-sizing:border-box;width:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  .event-bar{border-radius:2px;padding:0 5px;font-size:10px;font-weight:600;margin-bottom:1px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.1s;display:flex;align-items:center;gap:3px;flex-shrink:0;min-height:12px;max-height:12px;line-height:12px;box-sizing:border-box;width:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   .status-dot-cal{width:6px;height:6px;border-radius:50%;flex-shrink:0;display:inline-block}
   .event-bar:hover{opacity:0.8}
   .event-bar.warn{background:var(--warn-light);color:#92400E;border-left:2px solid var(--warn)}
@@ -914,6 +920,7 @@
     /* v.162: PC用の格納状態(.collapsed)はモバイルのドロワーには効かせない（幅・中身とも通常どおり） */
     .sidebar.collapsed{width:88%}
     .sidebar.collapsed .sidebar-inner{opacity:1;pointer-events:auto}
+    .day-holiday{display:none}   /* v.163: 祝日名はPCのみ（セルが狭い） */
     .sb-collapse-btn{display:none}
     .sb-mobile-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
     .sb-mobile-title{font-size:15px;font-weight:700;color:var(--text)}
@@ -1871,7 +1878,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.162';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.163';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -2441,6 +2448,50 @@ function updateSaveIndicator(){
 function addDaysStr(ds,n){
   const d=new Date(ds+'T00:00:00'); d.setDate(d.getDate()+n);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// v.163: 日本の祝日（法律の規則から計算。データ更新不要）
+//   固定日・ハッピーマンデー・春分/秋分（略算式、1980〜2099年有効）・振替休日・国民の休日 に対応。
+//   年ごとの特例（五輪年の移動など）は入れていない。必要になったら _JP_HOLIDAY_OVERRIDE に書く。
+const _JP_HOLIDAY_OVERRIDE = { /* 'YYYY-MM-DD':'名称' または '' で祝日取消 */ };
+const _jpHolidayCache = new Map();   // 年 → Map(日付文字列 → 名称)
+function _jpHolidayTable(y){
+  if(_jpHolidayCache.has(y)) return _jpHolidayCache.get(y);
+  const pad=n=>String(n).padStart(2,'0');
+  const ds=(m,d)=>`${y}-${pad(m)}-${pad(d)}`;
+  const nthMon=(m,n)=>{ const first=new Date(y,m-1,1).getDay(); const d=1+((8-first)%7)+(n-1)*7; return d; };
+  const t = new Map();
+  const add=(m,d,name)=>t.set(ds(m,d),name);
+  add(1,1,'元日'); add(1,nthMon(1,2),'成人の日'); add(2,11,'建国記念の日'); add(2,23,'天皇誕生日');
+  add(3,Math.floor(20.8431+0.242194*(y-1980)-Math.floor((y-1980)/4)),'春分の日');
+  add(4,29,'昭和の日'); add(5,3,'憲法記念日'); add(5,4,'みどりの日'); add(5,5,'こどもの日');
+  add(7,nthMon(7,3),'海の日'); add(8,11,'山の日'); add(9,nthMon(9,3),'敬老の日');
+  add(9,Math.floor(23.2488+0.242194*(y-1980)-Math.floor((y-1980)/4)),'秋分の日');
+  add(10,nthMon(10,2),'スポーツの日'); add(11,3,'文化の日'); add(11,23,'勤労感謝の日');
+  // 振替休日: 祝日が日曜なら、その後の最初の「祝日でない日」が休み
+  const base=[...t.keys()];
+  base.forEach(k=>{
+    const d=new Date(k+'T00:00:00');
+    if(d.getDay()!==0) return;
+    do{ d.setDate(d.getDate()+1); }while(t.has(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`));
+    t.set(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,'振替休日');
+  });
+  // 国民の休日: 前日と翌日が祝日に挟まれた平日（日曜・振替休日を除く）
+  base.forEach(k=>{
+    const d=new Date(k+'T00:00:00'); d.setDate(d.getDate()+2);
+    const k2=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    if(!t.has(k2)) return;
+    const m=new Date(k+'T00:00:00'); m.setDate(m.getDate()+1);
+    const km=`${m.getFullYear()}-${pad(m.getMonth()+1)}-${pad(m.getDate())}`;
+    if(!t.has(km) && m.getDay()!==0) t.set(km,'国民の休日');
+  });
+  Object.keys(_JP_HOLIDAY_OVERRIDE).forEach(k=>{ if(k.startsWith(y+'-')){ if(_JP_HOLIDAY_OVERRIDE[k]) t.set(k,_JP_HOLIDAY_OVERRIDE[k]); else t.delete(k); } });
+  _jpHolidayCache.set(y,t); return t;
+}
+// 祝日名を返す（祝日でなければ ''）。引数は 'YYYY-MM-DD'
+function jpHoliday(ds){
+  if(!ds || ds.length<10) return '';
+  const y=parseInt(ds.slice(0,4),10); if(!y) return '';
+  return _jpHolidayTable(y).get(ds)||'';
 }
 function diffDaysStr(a,b){
   return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000);
@@ -6455,10 +6506,13 @@ function renderCal(){
     const isOther=dayNum<1||dayNum>last;
     const dow=date.getDay();
     const cell=document.createElement('div');
-    cell.className='cal-day'+(isOther?' other-month':'')+(dow===0?' sun':dow===6?' sat':'')+((!isOther&&isTM&&today.getDate()===dayNum)?' today':'');
+    // v.163: 祝日は日曜と同じ赤。名称は日付の横に小さく出す（PCのみ。モバイルはCSSで非表示）
+    const _hol=jpHoliday(`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`);
+    cell.className='cal-day'+(isOther?' other-month':'')+(dow===0?' sun':dow===6?' sat':'')+(_hol?' holiday':'')+((!isOther&&isTM&&today.getDate()===dayNum)?' today':'');
     const head=document.createElement('div'); head.className='day-head';
     // 前月末・翌月頭は実際の日付を薄く表示
     const dn=document.createElement('div'); dn.className='day-num'; dn.textContent=isOther?date.getDate():dayNum; head.appendChild(dn);
+    if(_hol){ const hl=document.createElement('div'); hl.className='day-holiday'; hl.textContent=_hol; hl.title=_hol; head.appendChild(hl); }
     {
       const dstr=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       const w=WEATHER[dstr];
@@ -6728,7 +6782,7 @@ function renderCal(){
         bar.dataset.row=String(caseRow[c.id]||0);
       } else {
         // 1日案件：セル内に直接表示
-        bar.style.cssText=`background:${c.warn?'':bg};color:${fg};border-left:2px solid ${fg};border-radius:3px;padding:${IS_MOBILE()?'0 2px':'0 4px'};margin:0 4px 1px;width:calc(100% - 8px);min-height:${IS_MOBILE()?12:12}px;max-height:${IS_MOBILE()?12:12}px;box-sizing:border-box;`;
+        bar.style.cssText=`background:${c.warn?'':bg};color:${fg};border-left:${IS_MOBILE()?2:3}px solid ${fg};border-radius:2px;padding:${IS_MOBILE()?'0 2px':'0 5px'};margin:0 4px 1px;width:calc(100% - 8px);min-height:${IS_MOBILE()?12:12}px;max-height:${IS_MOBILE()?12:12}px;box-sizing:border-box;`;
         const _allAssignees=getAssignees(c);
         const _vendorIds=new Set(MEMBERS.filter(m=>m.role==='vendor').map(m=>String(m.id||'')));
         const _nonVendors=_allAssignees.filter(id=>!_vendorIds.has(String(id)));
@@ -6949,12 +7003,12 @@ function renderBandOverlay(){
         height:${_bandH}px;
         background:${c.warn?'var(--warn-light)':bg};
         color:${c.warn?'#92400E':fg};
-        ${showBorder?`border-left:2px solid ${c.warn?'var(--warn)':fg};`:''}
+        ${showBorder?`border-left:${_mob?2:3}px solid ${c.warn?'var(--warn)':fg};`:''}
         border-radius:${radius};
-        padding:${_mob?'0 2px':'0 4px'};
+        padding:${_mob?'0 2px':'0 5px'};
         display:flex;align-items:center;gap:3px;
         overflow:hidden;white-space:nowrap;
-        font-size:${_mob?'8px':'9px'};font-weight:500;
+        font-size:${_mob?'8px':'10px'};font-weight:${_mob?500:600};   /* v.163: PCは太く大きく（A案） */
         line-height:${_mob?'12px':'12px'};
         cursor:pointer;
         z-index:3;
