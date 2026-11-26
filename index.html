@@ -911,6 +911,9 @@
       box-shadow:2px 0 16px rgba(0,0,0,0.2);
     }
     .sidebar.mobile-open{transform:translateX(0)}
+    /* v.162: PC用の格納状態(.collapsed)はモバイルのドロワーには効かせない（幅・中身とも通常どおり） */
+    .sidebar.collapsed{width:88%}
+    .sidebar.collapsed .sidebar-inner{opacity:1;pointer-events:auto}
     .sb-collapse-btn{display:none}
     .sb-mobile-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
     .sb-mobile-title{font-size:15px;font-weight:700;color:var(--text)}
@@ -1209,9 +1212,9 @@
     <div id="activity-list" style="overflow-y:auto;flex:1;padding:6px"></div>
   </div>
   <div class="main">
-    <div class="sidebar" id="main-sidebar">
+    <div class="sidebar collapsed" id="main-sidebar"><!-- v.162: PCは初期状態で格納。◀ボタンで開く -->
       <!-- 格納ボタン -->
-      <button class="sb-collapse-btn" onclick="toggleSidebar()" title="サイドバーを格納">
+      <button class="sb-collapse-btn" onclick="toggleSidebar()" title="サイドバーを開く">
         <span class="sb-collapse-icon">◀</span>
       </button>
       <!-- モバイル用ヘッダー（閉じる） -->
@@ -1868,7 +1871,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.160';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.162';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -6033,7 +6036,10 @@ function hideMobileOverlay(){
 
 function toggleSidebar(){
   const sb = document.getElementById('main-sidebar');
-  sb.classList.toggle('collapsed');
+  const collapsed = sb.classList.toggle('collapsed');
+  // v.162: 初期が格納になったので、ボタンの説明も状態に合わせる
+  const btn = sb.querySelector('.sb-collapse-btn');
+  if(btn) btn.title = collapsed ? 'サイドバーを開く' : 'サイドバーを格納';
   // サイドバーのCSSトランジション（0.22s）完了後にカレンダーを再描画
   setTimeout(()=>{
     if(typeof trimCalCells==='function') trimCalCells();
@@ -9008,7 +9014,12 @@ function orderRows(){
       });
       const extraExpArr=Object.keys(extraExpMap.__extra__||{}).map(n=>({n, a:extraExpMap.__extra__[n]}));
 
-      const days=dayList.filter(d=>inPeriod(d,range));
+      // v.161: その日に作業員が1人も登録されていない日は行を作らない（集計・CSVからも外れる）。
+      //   「作業員あり」= 氏名が入っている or 金額が入っている（氏名あり・¥0 は表示する）。
+      //   諸経費だけの日も非表示（依頼どおり）。旧データ互換（v.amt を初日に計上）は初日だけ残す。
+      //   期間外の諸経費は、従来「最初の行」に付けていたのを「最初に表示される行」に付ける。
+      const dayHasWorker=d=>hasDaily ? ((dayNames[d]||[]).length>0 || (dayAmt[d]||0)>0) : (d===c.start && fallbackAmt>0);
+      const days=dayList.filter(d=>inPeriod(d,range) && dayHasWorker(d));
       if(!days.length) return;
 
       let first=true;
