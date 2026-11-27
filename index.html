@@ -710,6 +710,17 @@
   .pf-cancel-btn:hover{background:var(--bg)}
   .pf-delete-btn{border:1px solid #FCA5A5;background:none;border-radius:var(--radius);padding:8px 10px;font-size:12px;cursor:pointer;color:var(--danger)}
   .pf-delete-btn:hover{background:var(--danger-light)}
+  /* v.164: 案件パネルの文字サイズをカレンダー（日付12px・帯10px）に合わせて一段上げる。
+     ・ラベル 10→12px、見出し 10→11px、タイトル 13→14px、入力と表示値 12→13px、ボタン 12→13px
+     ・HTML／JSに直書きされた 10px・11px の補助文字は属性セレクタでまとめて 12px に（9pxのアバター文字は据え置き）
+     ・モバイルの入力 16px（iOSズーム防止）は @media 側が後勝ちでそのまま */
+  #add-panel .pf-label{font-size:12px;letter-spacing:0.03em}
+  #add-panel .panel-section-title{font-size:11px}
+  #add-panel .add-panel-title{font-size:14px}
+  #add-panel .pf-input,#add-panel .pf-select,#add-panel .pf-val{font-size:13px}
+  #add-panel .pf-save-btn,#add-panel .pf-cancel-btn,#add-panel .pf-delete-btn{font-size:13px}
+  #add-panel [style*="font-size:10px"],#add-panel [style*="font-size:11px"],#add-panel [style*="font-size: 10px"],#add-panel [style*="font-size: 11px"]{font-size:12px!important}
+  #add-panel [style*="font-size:9px"]{font-size:9px!important}
   .pf-edit-btn{border:1px solid var(--border);background:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:var(--text-muted)}
   .pf-edit-btn:hover{background:var(--bg)}
   .pf-back-btn{border:none;background:none;cursor:pointer;font-size:15px;color:var(--text-muted);padding:2px 4px;border-radius:4px;line-height:1}
@@ -1878,7 +1889,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.163';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.164';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
