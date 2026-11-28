@@ -710,6 +710,61 @@
   .pf-cancel-btn:hover{background:var(--bg)}
   .pf-delete-btn{border:1px solid #FCA5A5;background:none;border-radius:var(--radius);padding:8px 10px;font-size:12px;cursor:pointer;color:var(--danger)}
   .pf-delete-btn:hover{background:var(--danger-light)}
+  /* v.165: 案件パネルの見やすさ。①閲覧は「読む」表示（サマリーカード＋灰色の箱をやめる）②セクション見出し ⑤小さな直し */
+  .pf-sec{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:0.06em;margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border)}
+  .pf-sec.first{margin-top:0;padding-top:0;border-top:none}
+  .pf-req{color:var(--danger);font-weight:700}
+  .pf-label-flex{display:flex;align-items:center;justify-content:space-between}
+  .pf-link-btn{background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-transform:none;letter-spacing:0;font-weight:500}
+  .pf-link-btn:hover{text-decoration:underline}
+  /* サマリーカード（閲覧のみ） */
+  #pf-summary{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:4px;box-shadow:var(--shadow)}
+  .pfs-client{font-size:15px;font-weight:700;color:var(--text);line-height:1.3;margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .pfs-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.5;padding:3px 0}
+  .pfs-ic{width:18px;flex-shrink:0;text-align:center;font-size:13px;opacity:0.85}
+  .pfs-k{color:var(--text-muted);font-size:11px;width:36px;flex-shrink:0;padding-top:2px}
+  .pfs-v{flex:1;min-width:0;color:var(--text);font-weight:600;word-break:break-all}
+  .pfs-v a{color:var(--accent);text-decoration:none}
+  .pfs-sub{font-weight:400;color:var(--text-muted);font-size:11px;margin-left:4px}
+  .pfs-av{display:inline-flex;align-items:center;gap:4px;margin-right:8px;font-weight:600}
+  .pfs-av i{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;font-style:normal}
+  .pfs-night{display:inline-block;background:#EEF2FF;color:#3730A3;font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px}
+  /* 閲覧モード: 基本情報・日程はサマリーに集約し、本体の該当行と見出しは隠す */
+  #add-panel.pf-mode-view :is(#pf-sec-basic,#pf-sec-dates,#pf-client-row,#ap-client-abbr-row,#pf-contact-row,#pf-address-row,#pf-dates-row,#ap-night-row,#pf-assignee-row,#ap-est-wrap){display:none!important}
+  #add-panel.pf-mode-view #pf-sec-money{margin-top:4px;padding-top:0;border-top:none}
+  #add-panel.pf-mode-view .pf-row.pf-empty{display:none!important}
+  #add-panel.pf-mode-view .pf-val{border:none;background:transparent;padding:2px 0 0;min-height:0;font-size:14px;font-weight:600;color:var(--text)}
+  #add-panel.pf-mode-view #view-memo{font-size:13px;font-weight:400;line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:9px 11px}
+  #add-panel.pf-mode-view #ap-status{width:auto;min-width:120px;border-radius:999px;padding:5px 30px 5px 14px;font-weight:700;font-size:13px}
+  #add-panel.pf-mode-view .pf-row{margin-bottom:12px}
+  #add-panel.pf-mode-view #pf-memo-row .pf-label{display:none}   /* 見出し「メモ」と二重になるため */
+  /* v.166 ③: 折りたたみ */
+  .pf-fold-head{cursor:pointer;user-select:none}
+  .pf-fold-head:hover{color:var(--text)}
+  .pf-fold-chev{display:inline-block;width:12px;font-size:11px;transition:transform 0.15s;color:var(--text-muted)}
+  .pf-fold.collapsed .pf-fold-chev{transform:rotate(-90deg)}
+  .pf-fold.collapsed .pf-fold-body{display:none}
+  .pf-fold-empty{display:none;font-size:11px;color:var(--text-muted);font-weight:400;letter-spacing:0}
+  .pf-fold.collapsed[data-empty="1"] .pf-fold-empty{display:inline}
+  .pf-fold.collapsed .photo-section-title,.pf-fold.collapsed .panel-section-title{margin-bottom:0}
+  /* v.166 ④: 新規追加は必須を上、任意は畳む。DOMは共有なので新規モードだけ flex の order で並べ替える */
+  .pf-new-more{display:none;width:100%;text-align:left;background:var(--surface);border:1px dashed #93C5FD;color:var(--accent);border-radius:var(--radius);padding:9px 12px;font-size:13px;font-weight:600;cursor:pointer;margin:6px 0 4px}
+  .pf-new-more:hover{background:#EFF6FF}
+  .pf-new-more-sub{display:block;font-size:11px;color:var(--text-muted);font-weight:400;margin-top:2px}
+  #add-panel.pf-mode-new #pf-fields{display:flex;flex-direction:column}
+  #add-panel.pf-mode-new #pf-fields>*{order:10}
+  #add-panel.pf-mode-new #pf-name-row{order:1}
+  #add-panel.pf-mode-new #pf-sec-dates{order:2;margin-top:4px;padding-top:0;border-top:none}
+  #add-panel.pf-mode-new #ap-date-hint{order:3}
+  #add-panel.pf-mode-new #pf-dates-row{order:4}
+  #add-panel.pf-mode-new #ap-night-row{order:5}
+  #add-panel.pf-mode-new #pf-assignee-row{order:6}
+  #add-panel.pf-mode-new #pf-new-more{order:7;display:block}
+  #add-panel.pf-mode-new #pf-sec-basic{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+  /* 必須の行は id で指定（既存テストが HTML の文字列を固定しているため、行に class を足さない） */
+  #add-panel.pf-mode-new:not(.pf-more-open) #pf-fields>*:not(#pf-name-row):not(#pf-sec-dates):not(#ap-date-hint):not(#pf-dates-row):not(#ap-night-row):not(#pf-assignee-row):not(#pf-new-more){display:none!important}
+  #add-panel.pf-mode-new:not(.pf-more-open) #pf-new-more{display:block!important}
+  #add-panel.pf-mode-view .pf-label{letter-spacing:0.04em}
   /* v.164: 案件パネルの文字サイズをカレンダー（日付12px・帯10px）に合わせて一段上げる。
      ・ラベル 10→12px、見出し 10→11px、タイトル 13→14px、入力と表示値 12→13px、ボタン 12→13px
      ・HTML／JSに直書きされた 10px・11px の補助文字は属性セレクタでまとめて 12px に（9pxのアバター文字は据え置き）
@@ -1337,30 +1392,34 @@
           <div class="ap-success" id="ap-success">✓ 案件を追加しました</div>
 
           <!-- フォームフィールド群（新規・編集共用） -->
+          <!-- v.165: 閲覧モードのサマリーカード（顧客・期間・担当・金額を一目で）。showViewFields が中身を作る -->
+          <div id="pf-summary" style="display:none"></div>
+
           <div id="pf-fields">
-            <div class="pf-row" id="pf-name-row"><label class="pf-label" id="lbl-name">案件名 *</label>
+            <div class="pf-sec first" id="pf-sec-basic">📋 基本情報</div>
+            <div class="pf-row" id="pf-name-row"><label class="pf-label" id="lbl-name">案件名 <span class="pf-req">*</span></label>
               <span class="pf-val" id="view-name" style="display:none"></span>
               <input class="pf-input" id="ap-name" placeholder="○○ビル 電気設備点検">
             </div>
-            <div class="pf-row"><label class="pf-label">顧客名</label>
+            <div class="pf-row" id="pf-client-row"><label class="pf-label pf-label-flex">顧客名<button type="button" id="ap-client-cand-btn" onclick="openClientCandEditor()" class="pf-link-btn">候補を編集</button></label>
               <span class="pf-val" id="view-client" style="display:none"></span>
               <input class="pf-input" id="ap-client" placeholder="山田商事" list="ap-client-list" autocomplete="off">
               <datalist id="ap-client-list"></datalist>
             </div>
             <div class="pf-row" id="ap-client-abbr-row"><label class="pf-label" style="font-size:10px;color:var(--text-muted)">└ 略称</label>
               <input class="pf-input" id="ap-client-abbr" placeholder="カレンダー表示用（例：山田）" style="font-size:12px">
-              <button type="button" id="ap-client-cand-btn" onclick="openClientCandEditor()" style="margin-top:4px;background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-align:left">顧客名の候補を編集</button>
             </div>
-            <div class="pf-row"><label class="pf-label">連絡先</label>
+            <div class="pf-row" id="pf-contact-row"><label class="pf-label">連絡先</label>
               <span class="pf-val" id="view-contact" style="display:none"></span>
               <input class="pf-input" id="ap-contact" placeholder="090-1234-5678">
             </div>
-            <div class="pf-row"><label class="pf-label">現場住所</label>
+            <div class="pf-row" id="pf-address-row"><label class="pf-label">現場住所</label>
               <span class="pf-val" id="view-address" style="display:none"></span>
               <input class="pf-input" id="ap-address" placeholder="名古屋市中区...">
             </div>
+            <div class="pf-sec" id="pf-sec-dates">🗓 日程・担当</div>
             <div class="ap-date-hint" id="ap-date-hint">📅 カレンダーをタップ／ドラッグして日付を選択</div>
-            <div class="pf-row2">
+            <div class="pf-row2" id="pf-dates-row">
               <div class="pf-row" style="margin-bottom:0"><label class="pf-label">開始日</label>
                 <span class="pf-val" id="view-start" style="display:none"></span>
                 <input class="pf-input" id="ap-start" type="date">
@@ -1375,17 +1434,20 @@
               <span class="pf-val" id="view-night" style="display:none"></span>
               <label id="ap-night-label" style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);min-height:34px;box-sizing:border-box">
                 <input type="checkbox" id="ap-night" style="width:16px;height:16px;flex-shrink:0;margin:0;cursor:pointer">
-                <span>🌙 夜勤（翌朝まで）<span style="color:var(--text-muted);font-size:11px">／カレンダーは翌日まで表示</span></span>
+                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🌙 夜勤（翌朝まで）<span style="color:var(--text-muted);font-size:11px">／帯は翌日まで</span></span>
               </label>
             </div>
-            <div class="pf-row" style="margin-top:10px"><label class="pf-label">担当者</label>
+            <div class="pf-row" id="pf-assignee-row" style="margin-top:10px"><label class="pf-label">担当者</label>
               <span class="pf-val" id="view-assignee" style="display:none"></span>
-              <div id="ap-assignee" style="border:1px solid var(--border);border-radius:var(--radius);padding:5px 8px;background:var(--bg);max-height:110px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>
+              <div id="ap-assignee" style="border:1px solid var(--border);border-radius:var(--radius);padding:5px 8px;background:var(--bg);max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>
             </div>
+            <!-- v.166: 新規追加では必須（案件名・日付・夜勤・担当者）だけ上に出し、残りはこのボタンで開く（CSSの order で並べ替え） -->
+            <button type="button" id="pf-new-more" class="pf-new-more" onclick="pfToggleNewMore()">▸ 詳細を入力 <span class="pf-new-more-sub">顧客・連絡先・住所・見積・メモ など</span></button>
             <div id="ap-barcolor-row" class="pf-row" style="display:none;margin-top:2px">
               <div id="ap-barcolor-picks"></div>
             </div>
-            <div class="pf-row"><label class="pf-label">ステータス</label>
+            <div class="pf-sec" id="pf-sec-money">💴 状況・金額</div>
+            <div class="pf-row" id="pf-status-row"><label class="pf-label">ステータス</label>
               <span class="pf-val" id="view-status" style="display:none"></span>
               <select class="pf-select" id="ap-status">
                 <option value="未対応">未対応</option>
@@ -1404,7 +1466,8 @@
             <div class="pf-row" id="ap-vendors-wrap" style="display:none"><label class="pf-label">協力業者</label>
               <div id="pf-vendors-body"></div>
             </div>
-<div class="pf-row"><label class="pf-label">メモ</label>
+            <div class="pf-sec" id="pf-sec-memo">📝 メモ</div>
+            <div class="pf-row" id="pf-memo-row"><label class="pf-label">メモ</label>
               <div class="pf-val" id="view-memo" style="display:none;min-height:50px;align-items:flex-start;white-space:pre-wrap;word-break:break-all;height:auto"></div>
               <textarea class="pf-input" id="ap-memo" placeholder="備考・メモを入力…" style="font-family:inherit;field-sizing:content"></textarea>
             </div>
@@ -1425,28 +1488,36 @@
           </div>
 
           <!-- 写真セクション -->
-          <div id="pf-photos-section" style="display:none">
+          <!-- v.166: 写真・資料・コメントは折りたたみ（空なら閉じて1行、タップで開く） -->
+          <div id="pf-photos-section" class="pf-fold" style="display:none">
             <div class="photo-section">
-              <div class="photo-section-title">
+              <div class="photo-section-title pf-fold-head" onclick="pfToggleFold('pf-photos-section')">
+                <span class="pf-fold-chev">▾</span>
                 📷 写真
                 <span id="pf-photo-date" style="font-size:10px;color:var(--text-muted);font-weight:400"></span>
                 <span id="pf-photo-count" style="font-size:10px;background:#DBEAFE;color:#1D4ED8;padding:1px 7px;border-radius:99px"></span>
+                <span class="pf-fold-empty">なし</span>
               </div>
-              <label class="photo-upload-btn" id="pf-photo-upload-label">
-                <input type="file" accept="image/*" multiple style="display:none" id="pf-photo-input" onchange="handlePhotoUpload(this)">
-                📷 写真を選択してアップロード
-              </label>
-              <div class="photo-grid" id="pf-photo-grid"></div>
+              <div class="pf-fold-body">
+                <label class="photo-upload-btn" id="pf-photo-upload-label">
+                  <input type="file" accept="image/*" multiple style="display:none" id="pf-photo-input" onchange="handlePhotoUpload(this)">
+                  📷 写真を選択してアップロード
+                </label>
+                <div class="photo-grid" id="pf-photo-grid"></div>
+              </div>
             </div>
           </div>
 
           <!-- 資料セクション -->
-          <div id="pf-docs-section" style="display:none">
+          <div id="pf-docs-section" class="pf-fold" style="display:none">
             <div class="photo-section">
-              <div class="photo-section-title">
+              <div class="photo-section-title pf-fold-head" onclick="pfToggleFold('pf-docs-section')">
+                <span class="pf-fold-chev">▾</span>
                 📎 資料
                 <span id="pf-doc-count" style="font-size:10px;background:#DBEAFE;color:#1D4ED8;padding:1px 7px;border-radius:99px"></span>
+                <span class="pf-fold-empty">なし</span>
               </div>
+              <div class="pf-fold-body">
               <div class="doc-list" id="pf-doc-list"></div>
               <div class="doc-add-row" id="pf-doc-add" style="display:none">
                 <div style="font-size:11px;color:var(--text-muted);line-height:1.5">図面・見積書・契約書などを登録できます。PDF・Excel・Word・画像・図面などをそのままアップロードできます。</div>
@@ -1463,17 +1534,25 @@
                 <input class="doc-input" id="pf-doc-url" placeholder="GoogleドライブやPDFの共有リンクを貼り付け">
                 <button class="doc-add-btn" onclick="addDoc()">＋ URLで資料を追加</button>
               </div>
+              </div>
             </div>
           </div>
 
           <!-- 閲覧時の追加情報（コメント） -->
-          <div id="pf-view-extra" style="display:none">
+          <div id="pf-view-extra" class="pf-fold" style="display:none">
             <hr class="panel-divider">
-            <div class="panel-section-title">コメント</div>
-            <div class="comment-list" id="pf-comments" style="margin-bottom:10px"></div>
-            <div class="comment-input-row">
-              <input class="comment-input" id="comment-in" placeholder="コメントを入力…">
-              <button class="send-btn" id="pf-send-btn">送信</button>
+            <div class="panel-section-title pf-fold-head" onclick="pfToggleFold('pf-view-extra')" style="display:flex;align-items:center;gap:6px">
+              <span class="pf-fold-chev">▾</span>
+              💬 コメント
+              <span id="pf-comment-count" style="font-size:10px;background:#DBEAFE;color:#1D4ED8;padding:1px 7px;border-radius:99px;letter-spacing:0"></span>
+              <span class="pf-fold-empty">なし</span>
+            </div>
+            <div class="pf-fold-body">
+              <div class="comment-list" id="pf-comments" style="margin-bottom:10px"></div>
+              <div class="comment-input-row">
+                <input class="comment-input" id="comment-in" placeholder="コメントを入力…">
+                <button class="send-btn" id="pf-send-btn">送信</button>
+              </div>
             </div>
           </div>
 
@@ -1889,7 +1968,7 @@ const DEMO_CASES = []
 
 
 const _today=new Date(); let currentUser=null, currentYear=_today.getFullYear(), currentMonth=_today.getMonth();
-const APP_VERSION = 'β v.164';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
+const APP_VERSION = 'β v.166';   // ★変更するたびにこの数字を上げる（両画面に自動反映）
 function _applyVersion(){ document.querySelectorAll('.app-version').forEach(el=>el.textContent=APP_VERSION); }
 if(document.readyState!=='loading') _applyVersion(); else document.addEventListener('DOMContentLoaded', _applyVersion);
 let cases=[...DEMO_CASES], visibleMembers=new Set();
@@ -4449,6 +4528,7 @@ function renderPhotoSection(caseId){
   const dateEl = document.getElementById('pf-photo-date');
   if(dateEl) dateEl.textContent = '';
   if(count) count.textContent = photos.length > 0 ? photos.length+'枚' : '';
+  _pfFoldSet('pf-photos-section', photos.length);   // v.166
 
   grid.innerHTML = photos.map(p=>`
     <div class="photo-thumb" id="photo-thumb-${p.id}">
@@ -4636,6 +4716,7 @@ function renderDocSection(caseId){
   const _c=cases.find(x=>String(x.id)===String(caseId));
   const docs=(_c&&Array.isArray(_c.docs))?_c.docs:[];
   if(count) count.textContent = docs.length>0 ? docs.length+'件' : '';
+  _pfFoldSet('pf-docs-section', docs.length);   // v.166
   list.innerHTML = docs.length
     ? docs.map(d=>`
       <div class="doc-item" id="doc-item-${d.id}">
@@ -7477,7 +7558,10 @@ function showViewFields(c){
     const el=document.getElementById(id); if(!el) return;
     el.innerHTML=html||'<span style="color:var(--text-muted)">—</span>';
     el.style.display='flex';
+    // v.165: 空の項目は閲覧で行ごと隠す（CSS .pf-mode-view .pf-empty）
+    const r=el.closest('.pf-row'); if(r) r.classList.toggle('pf-empty', !html);
   };
+  _pfBuildSummary(c);   // v.165
   setView('view-name', escHtml(c.name));
   // v.111: 案件名をヘッダー2行目に上部固定表示し、本体の案件名行は隠す（二重表示を回避）
   { const hc=document.getElementById('pf-header-casename'); if(hc){ hc.textContent=c.name||''; hc.style.display='block'; } }
@@ -7552,6 +7636,8 @@ function showViewFields(c){
     vm.style.display=c.memo?'block':'none';
     if(c.memo){ const pmr=vm.closest('.pf-row'); if(pmr) pmr.style.display=''; }
     else { const pmr=vm.closest('.pf-row'); if(pmr) pmr.style.display='none'; }
+    // v.165: メモが無ければ見出し「📝 メモ」も出さない（入力モードに入るときは showInputFields が戻す）
+    const _ms=document.getElementById('pf-sec-memo'); if(_ms) _ms.style.display=c.memo?'':'none';
   }
 
   // 公開範囲
@@ -7566,7 +7652,67 @@ function showViewFields(c){
   renderVendors(false);
 }
 
+// v.165: パネルのモードを #add-panel のクラスで持つ（CSSで閲覧／入力の見た目を切り替える）。
+//   サマリーカードは閲覧のみ。入力モードに入ったら隠す。
+// v.166 ③: 写真・資料・コメントの折りたたみ。空なら閉じて「なし」、あれば開く（案件を開くたびに初期化）
+function pfToggleFold(id){ const el=document.getElementById(id); if(el) el.classList.toggle('collapsed'); }
+function _pfFoldSet(id, count){
+  const el=document.getElementById(id); if(!el) return;
+  el.dataset.empty = count>0 ? '0' : '1';
+  el.classList.toggle('collapsed', !(count>0));
+}
+// v.166 ④: 新規追加の「詳細を入力」
+function pfToggleNewMore(){
+  const p=document.getElementById('add-panel'); if(!p) return;
+  const open=p.classList.toggle('pf-more-open');
+  const b=document.getElementById('pf-new-more');
+  if(b) b.innerHTML = open ? '▾ 詳細を閉じる' : '▸ 詳細を入力 <span class="pf-new-more-sub">顧客・連絡先・住所・見積・メモ など</span>';
+}
+function _pfSetMode(mode){
+  const p=document.getElementById('add-panel'); if(!p) return;
+  p.classList.remove('pf-mode-new','pf-mode-view','pf-mode-edit');
+  p.classList.add('pf-mode-'+mode);
+  // v.166 ④: 新規に入るたびに「詳細」は畳む
+  if(mode==='new'){ p.classList.remove('pf-more-open'); const b=document.getElementById('pf-new-more'); if(b) b.innerHTML='▸ 詳細を入力 <span class="pf-new-more-sub">顧客・連絡先・住所・見積・メモ など</span>'; }
+  const sm=document.getElementById('pf-summary');
+  if(sm && mode!=='view'){ sm.style.display='none'; sm.innerHTML=''; }
+}
+// 閲覧用サマリー: 顧客／連絡先／住所／期間／担当／見積（admin のみ）。空の項目は行ごと出さない。
+function _pfBuildSummary(c){
+  const sm=document.getElementById('pf-summary'); if(!sm) return;
+  const rows=[];
+  const row=(ic,k,v)=>{ if(v) rows.push(`<div class="pfs-row"><span class="pfs-ic">${ic}</span><span class="pfs-k">${k}</span><span class="pfs-v">${v}</span></div>`); };
+  const _md=ds=>{ if(!ds) return ''; const p=ds.split('-'); return parseInt(p[1],10)+'/'+parseInt(p[2],10); };
+  const _dow=ds=>['日','月','火','水','木','金','土'][new Date(ds+'T00:00:00').getDay()];
+  // 期間
+  let period='';
+  if(c.start){
+    const days=(c.end&&c.end>c.start)?diffDaysStr(c.start,c.end)+1:1;
+    period = (c.end&&c.end!==c.start) ? `${_md(c.start)}(${_dow(c.start)}) 〜 ${_md(c.end)}(${_dow(c.end)})` : `${_md(c.start)}(${_dow(c.start)})`;
+    period += `<span class="pfs-sub">${days}日間</span>`;
+    if(c.nightShift) period += ` <span class="pfs-night">🌙 夜勤</span>`;
+  }
+  row('🗓','期間',period);
+  // 担当
+  {
+    const ids=getAssignees(c);
+    const vendorIds=new Set(MEMBERS.filter(m=>m.role==='vendor').map(m=>String(m.id||'')));
+    const parts=ids.filter(id=>!vendorIds.has(String(id))).map(aid=>{ const am=getMember(aid); return am?`<span class="pfs-av"><i style="background:${am.color}">${escHtml(am.name[0])}</i>${escHtml(am.name)}</span>`:''; }).filter(Boolean);
+    if(ids.some(id=>vendorIds.has(String(id)))) parts.push('<span class="pfs-av"><i style="background:#B45309">協</i>協力業者</span>');
+    row('👷','担当',parts.join(''));
+  }
+  row('📞','連絡',c.contact?`<a href="tel:${escHtml(c.contact)}">${escHtml(c.contact)}</a>`:'');
+  {
+    const a=(c.address||'').trim();
+    row('📍','住所',(a&&a!=='未設定')?`<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}" target="_blank" rel="noopener">${escHtml(a)}</a>`:'');
+  }
+  if(isAdminView() && (parseInt(c.est)||0)>0) row('💴','見積',`¥${(parseInt(c.est)||0).toLocaleString()}`);
+  const client=(c.client&&c.client!=='未設定')?escHtml(c.client):'';
+  sm.innerHTML = (client?`<div class="pfs-client">${client}${c.clientAbbr?`<span class="pfs-sub">（${escHtml(c.clientAbbr)}）</span>`:''}</div>`:'') + rows.join('');
+  sm.style.display = (client||rows.length) ? 'block' : 'none';
+}
 function showInputFields(){
+  { const _ms=document.getElementById('pf-sec-memo'); if(_ms) _ms.style.display=''; }   // v.165
   // v.111: 入力モードでは案件名はヘッダー固定表示を隠し、本体の入力行を表示
   { const hc=document.getElementById('pf-header-casename'); if(hc){ hc.style.display='none'; hc.textContent=''; } }
   { const nr=document.getElementById('pf-name-row'); if(nr) nr.style.display=''; }
@@ -7630,6 +7776,7 @@ function showNewMode(showPanel=false){
   updateBarColorPicker('');
   // ヘッダー: 新規追加モード（青）
   const _h=document.getElementById('pf-header'); if(_h) _h.className='add-panel-header mode-new';
+  _pfSetMode('new');   // v.165
   const _l=document.getElementById('pf-mode-label'); if(_l){ _l.className='mode-label new'; _l.textContent='新規追加'; }
   document.getElementById('pf-back-btn').style.display='none';
   const _db=document.getElementById('pf-del-btn'); if(_db) _db.style.display='none';
@@ -7787,6 +7934,7 @@ function openDetail(id, date){
 
   // ヘッダー
   { const h=document.getElementById('pf-header'); if(h) h.className='add-panel-header mode-view'; const l=document.getElementById('pf-mode-label'); if(l){ l.className='mode-label view'; l.textContent='案件詳細'; } }
+  _pfSetMode('view');   // v.165
   { const pb=document.getElementById('pf-body'); if(pb) pb.style.background='#F8FAFC'; }
     document.getElementById('pf-back-btn').style.display='block';
   // pf-title removed
@@ -7813,6 +7961,7 @@ function openDetail(id, date){
   const extra=document.getElementById('pf-view-extra'); extra.style.display='block';
   // コメント
   const cmtList=document.getElementById('pf-comments'); if(!cmtList) return; cmtList.innerHTML='';
+  { const n=(c.comments||[]).length; const cc=document.getElementById('pf-comment-count'); if(cc) cc.textContent=n?n+'件':''; _pfFoldSet('pf-view-extra', n); }   // v.166
   c.comments.forEach(cm=>{
     const cm_m=getMember(cm.user);
     const div=document.createElement('div'); div.className='comment-item';
@@ -7839,6 +7988,7 @@ function enterEditMode(){
   const c=cases.find(x=>x.id===panelCaseId); if(!c) return;
   // ヘッダーを編集モード（黄）に
   { const h=document.getElementById('pf-header'); if(h) h.className='add-panel-header mode-edit'; const l=document.getElementById('pf-mode-label'); if(l){ l.className='mode-label edit'; l.textContent='編集中'; } }
+  _pfSetMode('edit');   // v.165
   { const pb=document.getElementById('pf-body'); if(pb) pb.style.background='#FFFDF0'; }
   document.getElementById('pf-edit-btn').style.display='none';
   document.getElementById('pf-del-btn').style.display='none'; // 編集中は削除非表示
@@ -7950,6 +8100,7 @@ function pfSendComment(cid){
   div.innerHTML=`<div style="width:26px;height:26px;border-radius:50%;background:${m?m.color:'#888'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${m?m.name[0]:'?'}</div>
     <div class="comment-body"><div class="comment-author" style="color:${m?m.color:'#888'}">${m?m.name:currentUser} <span class="comment-time">${time}</span></div><div class="comment-text">${text}</div></div>`;
   list.appendChild(div); list.scrollTop=9999;
+  { const cc=document.getElementById('pf-comment-count'); if(cc) cc.textContent=c.comments.length+'件'; const f=document.getElementById('pf-view-extra'); if(f) f.dataset.empty='0'; }   // v.166
 }
 
 function closeDetail(){ showNewMode(); if(typeof renderCal==='function') renderCal(); }
